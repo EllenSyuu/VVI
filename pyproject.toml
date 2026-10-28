@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vvi"
+version = "0.1.0"
+description = "Hybrid immunity and immune imprinting on calendar-time risk sets: exact, sampling-free cloglog hazard models for vaccination–infection histories."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Ziyi Zhou" }]
+requires-python = ">=3.10"
+keywords = ["epidemiology", "vaccine effectiveness", "survival analysis", "discrete-time hazard", "COVID-19", "hybrid immunity"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+  "License :: OSI Approved :: Apache Software License",
+]
+dependencies = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "statsmodels>=0.14", "patsy>=0.5.6"]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7"]
+dev = ["pytest>=7", "ruff>=0.5", "matplotlib>=3.7"]
+
+[project.scripts]
+vvi = "vvi.cli:main"
+
+[project.urls]
+Repository = "https://github.com/EllenSyuu/VVI"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vvi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E702"]
