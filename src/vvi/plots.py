@@ -1,722 +1,804 @@
-"""Atelier figures: ink and graphite on warm paper, orange for the data that matters.
+"""Static figures, rendered in a light and a dark theme.
 
-The visual language follows an engineer's drawing plate — ruled frames, Cormorant
-Garamond labels in small caps, hand-lettered notes (La Belle Aurore) and hatched
-ridges — so every chart reads as part of one set. Fonts (SIL OFL) ship with the
-package; install the ``plot`` extra for matplotlib and Pillow.
+Figures are laid out for the width at which they are read: a README column on GitHub
+is about 880 px wide, so figures are 10 inches wide with type sized so that the
+smallest label still renders at roughly 11 px. Multi-panel figures stack vertically
+rather than squeezing panels side by side.
 
-Building blocks
----------------
-:func:`plate`        figure with paper ground, title block and double-ruled frame
-:func:`style_axes`   ink axes, serif tick labels, dotted faint grid
-:func:`hand`         hand-lettered annotation with a paper halo
-:func:`save`         write a PNG with the paper grain multiplied in
-
-Charts
-------
-:func:`forest`, :func:`contrasts`, :func:`trend`, :func:`waning`,
-:func:`power_curves`, :func:`histories`, :func:`benchmark`
+Colour follows the job it does: the two vaccine platforms take two fixed categorical
+slots (Comirnaty blue, CoronaVac orange), ordered quantities use one sequential hue,
+and text always uses ink tokens, never a series colour. Install the ``plot`` extra.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from functools import cache
-from importlib import resources
+import io
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, BinaryIO, cast
 
-import numpy as np
-import pandas as pd
+import matplotlib
 
-from vvi.model import HybridImmunityFit
-from vvi.sequence import parse
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib.axes import Axes  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
+from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator  # noqa: E402
 
-# --- palette (validated: platform pair passes CVD and contrast checks on PAPER) ---
-PAPER = "#f6f1e6"
-INK = "#22314a"
-GRAPH = "#6f7b8c"
-FAINT = "#b4bcc7"
-ORANGE = "#cf602b"
-AMBER = "#e0a046"
-RUST = "#a3432a"
-BLUE = "#1d6fb8"
-PLATFORM_COLORS: dict[str | None, str] = {"B": BLUE, "S": ORANGE, None: GRAPH}
-PLATFORM_NAMES = {"B": "Comirnaty", "S": "CoronaVac"}
+from vvi.model import HybridImmunityFit  # noqa: E402
+from vvi.sequence import parse  # noqa: E402
 
-# Backwards-compatible aliases (v0.1)
-SURFACE = PAPER
-INK_2 = GRAPH
-MUTED = GRAPH
-GRID = FAINT
-
-_HAIR = " "  # hair space, for letter-spaced small caps
+WIDTH = 10.0  # inches; displayed at ~880 px in a README column
 
 
-@cache
-def fonts() -> dict:
-    """Register the bundled fonts and return ``FontProperties`` by role.
-
-    Roles: ``label`` (Cormorant SemiBold), ``serif`` (Cormorant Medium),
-    ``italic`` (Cormorant Italic), ``hand`` (La Belle Aurore), ``sans`` (Inter),
-    ``mono`` (JetBrains Mono).
-    """
-    from matplotlib import font_manager as fm
-
-    root = resources.files("vvi") / "fonts"
-    files = {
-        "label": "CormorantGaramond-SemiBold.ttf",
-        "serif": "CormorantGaramond-Medium.ttf",
-        "italic": "CormorantGaramond-Italic.ttf",
-        "hand": "LaBelleAurore-Regular.ttf",
-        "sans": "Inter-Regular.ttf",
-        "mono": "JetBrainsMono-Regular.ttf",
-    }
-    out = {}
-    for role, name in files.items():
-        path = str(root / name)
-        fm.fontManager.addfont(path)
-        out[role] = fm.FontProperties(fname=path)
-    return out
+@dataclass(frozen=True)
+class Theme:
+    name: str
+    surface: str
+    ink: str
+    ink_2: str
+    ink_3: str
+    grid: str
+    series: tuple[str, str, str]  # categorical slots 1-3: blue, orange, aqua
+    ramp: tuple[str, ...]  # sequential blue, faint -> strong
+    soft: tuple[str, str, str]  # tints of the series, for bands and fills
 
 
-def _fp(role: str, size: float):
-    fp = fonts()[role].copy()
-    fp.set_size(size)
-    return fp
+LIGHT = Theme(
+    name="light",
+    surface="#ffffff",
+    ink="#16202e",
+    ink_2="#4b5768",
+    ink_3="#7d8896",
+    grid="#e6eaef",
+    series=("#2a78d6", "#eb6834", "#1baf7a"),
+    ramp=("#b9d3f0", "#7eaee6", "#3b7dd8", "#1b4f9c", "#0e3a73"),
+    soft=("#dce9f8", "#fbe1d6", "#d4f1e6"),
+)
+DARK = Theme(
+    name="dark",
+    surface="#0d1117",  # GitHub dark canvas, so README images sit flush
+    ink="#e8edf3",
+    ink_2="#a3afbd",
+    ink_3="#6f7c8c",
+    grid="#222b36",
+    series=("#4a94ea", "#f07a45", "#1fb98f"),
+    ramp=("#1d3f6e", "#2f6ab2", "#5c9be6", "#9cc4f3", "#d3e5fa"),
+    soft=("#16273d", "#36221a", "#13302a"),
+)
+THEMES = {"light": LIGHT, "dark": DARK}
+_theme: Theme = LIGHT
 
 
-def spaced(text: str) -> str:
-    """Letter-space a small-caps label: ``"FIG"`` -> ``"F I G"`` with hair spaces."""
-    return _HAIR.join(text.upper())
-
-
-# ---------------------------------------------------------------- building blocks
-def plate(
-    figsize: tuple[float, float] = (8.0, 4.8),
-    *,
-    kicker: str = "",
-    title: str = "",
-    note: str | None = None,
-    top: float = 0.80,
-):
-    """A figure laid out as a drawing plate.
-
-    Returns ``fig``; the drawing area is ``[0.08, 0.12, 0.88, top - 0.14]`` in figure
-    coordinates (use ``fig.add_axes`` or ``fig.add_gridspec(top=top - 0.06, ...)``).
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.lines import Line2D
-
-    fig = plt.figure(figsize=figsize, facecolor=PAPER)
-    w, h = figsize
-    mx, my = 0.18 / w, 0.18 / h  # outer frame inset (inches -> fraction)
-    for inset, lw in ((0.0, 0.9), (0.05, 0.35)):
-        ix, iy = mx + inset / w, my + inset / h
-        fig.add_artist(
-            Line2D(
-                [ix, 1 - ix, 1 - ix, ix, ix],
-                [iy, iy, 1 - iy, 1 - iy, iy],
-                transform=fig.transFigure,
-                color=INK,
-                lw=lw,
-                solid_joinstyle="miter",
-            )
-        )
-    left = 0.42 / w
-    if kicker:
-        fig.text(
-            left,
-            1 - 0.46 / h,
-            spaced(kicker),
-            fontproperties=_fp("label", 8.6),
-            color=GRAPH,
-            va="baseline",
-        )
-    if title:
-        fig.text(
-            left, 1 - 0.80 / h, title, fontproperties=_fp("italic", 17), color=INK, va="baseline"
-        )
-    rule_y = 1 - 0.98 / h
-    fig.add_artist(
-        Line2D([left, 1 - left], [rule_y, rule_y], transform=fig.transFigure, color=INK, lw=0.6)
+def set_theme(name: str = "light") -> Theme:
+    """Activate a theme for every figure rendered afterwards."""
+    global _theme
+    _theme = THEMES[name]
+    t = _theme
+    plt.rcParams.update(
+        {
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Inter", "Helvetica Neue", "Arial", "DejaVu Sans"],
+            "font.size": 12,
+            "figure.facecolor": t.surface,
+            "axes.facecolor": t.surface,
+            "savefig.facecolor": t.surface,
+            "savefig.dpi": 200,
+            "axes.edgecolor": t.grid,
+            "axes.linewidth": 1.0,
+            "axes.labelcolor": t.ink_2,
+            "axes.labelsize": 12,
+            "axes.labelpad": 8,
+            "axes.titlecolor": t.ink,
+            "axes.titlesize": 13.5,
+            "axes.titleweight": "bold",
+            "axes.titlelocation": "left",
+            "axes.titlepad": 10,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.spines.left": False,
+            "axes.grid": True,
+            "axes.grid.axis": "y",
+            "axes.axisbelow": True,
+            "grid.color": t.grid,
+            "grid.linewidth": 1.0,
+            "xtick.color": t.ink_2,
+            "ytick.color": t.ink_2,
+            "xtick.labelsize": 11,
+            "ytick.labelsize": 11,
+            "ytick.major.size": 0,
+            "xtick.major.size": 4,
+            "xtick.major.pad": 6,
+            "ytick.major.pad": 6,
+            "text.color": t.ink,
+            "legend.labelcolor": t.ink_2,
+            "legend.fontsize": 11.5,
+            "legend.frameon": False,
+            "legend.handlelength": 1.6,
+            "legend.columnspacing": 1.6,
+            "lines.solid_capstyle": "round",
+        }
     )
-    fig.add_artist(
-        Line2D(
-            [left, 1 - left], [rule_y - 0.035 / h] * 2, transform=fig.transFigure, color=INK, lw=0.3
-        )
+    return t
+
+
+set_theme("light")
+
+
+def theme() -> Theme:
+    """The active theme."""
+    return _theme
+
+
+# --------------------------------------------------------------------------- helpers
+
+
+def platform_color(profile: str) -> str:
+    """Comirnaty profiles blue, CoronaVac orange, anything else muted ink."""
+    p = parse(profile).platform
+    return {"B": _theme.series[0], "S": _theme.series[1]}.get(p or "", _theme.ink_3)
+
+
+def _figure(height: float, title: str, subtitle: str, legend: bool = False) -> Figure:
+    """A constrained-layout figure with a title block laid out in inches."""
+    fig = plt.figure(figsize=(WIDTH, height), layout="constrained")
+    fig.text(
+        0.012,
+        1 - 0.2 / height,
+        title,
+        ha="left",
+        va="top",
+        fontsize=19,
+        fontweight="bold",
+        color=_theme.ink,
     )
-    if note:
-        fig.text(
-            1 - left,
-            1 - 0.80 / h,
-            note,
-            fontproperties=_fp("hand", 11),
-            color=ORANGE,
-            ha="right",
-            va="baseline",
-        )
+    fig.text(
+        0.012,
+        1 - 0.62 / height,
+        subtitle,
+        ha="left",
+        va="top",
+        fontsize=12.5,
+        color=_theme.ink_2,
+        wrap=True,
+    )
+    top = 1 - (1.42 if legend else 1.05) / height
+    engine = fig.get_layout_engine()
+    if engine is not None:
+        cast(Any, engine).set(rect=(0, 0, 1, top), w_pad=0.08, h_pad=0.12, hspace=0.08, wspace=0.06)
     return fig
 
 
-def style_axes(ax, *, grid: str = "x"):
-    """Ink axes on paper, Cormorant tick labels, dotted faint grid."""
-    ax.set_facecolor("none")
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color(INK)
-        ax.spines[side].set_linewidth(0.8)
-    ax.tick_params(colors=INK, width=0.6, length=4, direction="out", labelcolor=GRAPH)
-    for lab in ax.get_xticklabels() + ax.get_yticklabels():
-        lab.set_fontproperties(_fp("label", 10))
-    if grid:
-        ax.grid(axis=grid, color=FAINT, lw=0.55, ls=(0, (1, 3)))
-    ax.set_axisbelow(True)
-    return ax
+def _legend(fig: Figure, handles: Sequence[Any], ncols: int) -> None:
+    fig.legend(
+        handles=handles,
+        loc="upper left",
+        ncols=ncols,
+        bbox_to_anchor=(0.006, 1 - 0.98 / fig.get_figheight()),
+    )
 
 
-style = style_axes  # v0.1 name
-
-
-def _tick_fonts(ax, size: float = 10):
-    for lab in ax.get_xticklabels() + ax.get_yticklabels():
-        lab.set_fontproperties(_fp("label", size))
-
-
-def axis_label(ax, text: str, which: str = "x", size: float = 12):
-    """Hand-lettered axis caption, as on the website charts."""
-    if which == "x":
-        ax.set_xlabel(text, fontproperties=_fp("hand", size), color=GRAPH, labelpad=6)
+def _save(fig: Figure, out: Path | BinaryIO, dpi: float | None = None) -> Path:
+    if isinstance(out, Path):
+        out.parent.mkdir(parents=True, exist_ok=True)
+    if dpi is None:
+        fig.savefig(out, format="png")
     else:
-        ax.set_ylabel(text, fontproperties=_fp("hand", size), color=GRAPH, labelpad=8)
-
-
-def hand(ax, x, y, text, *, color: str = INK, size: float = 12, transform=None, **kw):
-    """Hand-lettered note with a paper halo so it reads over linework."""
-    from matplotlib import patheffects as pe
-
-    return ax.text(
-        x,
-        y,
-        text,
-        fontproperties=_fp("hand", size),
-        color=color,
-        transform=transform or ax.transData,
-        path_effects=[pe.withStroke(linewidth=3.2, foreground=PAPER)],
-        **kw,
-    )
-
-
-def caps(ax, x, y, text, *, color: str = GRAPH, size: float = 8.6, transform=None, **kw):
-    """Letter-spaced small-caps label."""
-    return ax.text(
-        x,
-        y,
-        spaced(text),
-        fontproperties=_fp("label", size),
-        color=color,
-        transform=transform or ax.transData,
-        **kw,
-    )
-
-
-def hr_axis(ax, ticks=(0.1, 0.2, 0.3, 0.5, 0.7, 1, 1.5, 2, 3)):
-    """Log-scaled hazard-ratio axis with plain decimal tick labels."""
-    from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
-
-    ax.set_xscale("log")
-    lo, hi = ax.get_xlim()
-    ax.xaxis.set_major_locator(FixedLocator([t for t in ticks if lo <= t <= hi]))
-    ax.xaxis.set_minor_locator(NullLocator())
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
-    _tick_fonts(ax)
-    return ax
-
-
-def save(fig, path: str | Path, *, dpi: int = 220, grain: bool = True) -> Path:
-    """Save a PNG, multiplying the paper grain over it (as on the website plates)."""
-    import matplotlib.pyplot as plt
-    from PIL import Image, ImageChops
-
-    path = Path(path)
-    fig.savefig(path, dpi=dpi, facecolor=PAPER)
+        fig.savefig(out, dpi=dpi, format="png")
     plt.close(fig)
-    if grain:
-        img = Image.open(path).convert("RGB")
-        with resources.as_file(resources.files("vvi") / "assets" / "grain.png") as g:
-            tile = Image.open(g).convert("RGBA")
-        scale = max(1, round(dpi / 100))
-        tile = tile.resize((tile.width * scale, tile.height * scale))
-        layer = Image.new("RGB", img.size, "white")
-        flat = Image.new("RGB", tile.size, "white")
-        flat.paste(tile, mask=tile.split()[3])
-        for x in range(0, img.width, flat.width):
-            for y in range(0, img.height, flat.height):
-                layer.paste(flat, (x, y))
-        img = Image.blend(img, ImageChops.multiply(img, layer), 0.3)
-        img.save(path, optimize=True)
-    return path
+    return out if isinstance(out, Path) else Path()
 
 
-# ---------------------------------------------------------------- charts
-def _whisker(ax, lo, hi, y, color, cap: float = 0.13, lw: float = 1.6):
-    ax.plot([lo, hi], [y, y], color=color, lw=lw, solid_capstyle="butt", zorder=3)
-    for v in (lo, hi):
-        ax.plot([v, v], [y - cap, y + cap], color=color, lw=0.9, zorder=3)
+def _ease(x: float) -> float:
+    """Ease-out cubic on [0, 1]."""
+    x = min(1.0, max(0.0, x))
+    return 1 - (1 - x) ** 3
 
 
-def forest(
+def _stage(progress: float, k: int, n: int) -> float:
+    """Progress of the k-th of n sequential stages, eased."""
+    return _ease(progress * n - k)
+
+
+def _log_axis(ax: Axes, ticks: Sequence[float], axis: str = "x") -> None:
+    a = ax.xaxis if axis == "x" else ax.yaxis
+    (ax.set_xscale if axis == "x" else ax.set_yscale)("log")
+    a.set_major_locator(FixedLocator(list(ticks)))
+    a.set_minor_locator(NullLocator())
+    a.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+
+
+def _people(v: float, _: object = None) -> str:
+    return f"{v / 1e6:g}M" if v >= 1e6 else f"{v / 1e3:g}k"
+
+
+def _ci(ax: Axes, lo: float, hi: float, y: float, color: str, lw: float = 2.2) -> None:
+    ax.plot([lo, hi], [y, y], color=color, lw=lw, solid_capstyle="round", zorder=3)
+
+
+def _dot(ax: Axes, x: float, y: float, color: str, s: float = 60) -> None:
+    ax.scatter([x], [y], s=s, color=color, edgecolor=_theme.surface, linewidth=1.8, zorder=4)
+
+
+def _ring(ax: Axes, x: float, y: float, s: float = 120) -> None:
+    ax.scatter([x], [y], s=s, facecolor="none", edgecolor=_theme.ink, linewidth=1.4, zorder=5)
+
+
+# --------------------------------------------------------------------------- hero
+
+
+HERO_PROFILES = ("BB", "BBB", "BBI", "BBBI")
+
+
+def hero(fit: HybridImmunityFit, out: Path | BinaryIO, progress: float = 1.0) -> Path:
+    """Fitted daily infection rate by exposure history, and the hazard ratios behind it."""
+    t = _theme
+    colors = dict(zip(HERO_PROFILES, (t.ink_3, t.ramp[2], t.series[2], t.series[1]), strict=True))
+    labels = {"BB": "BB (reference)", "BBB": "BBB", "BBI": "BBI", "BBBI": "BBBI"}
+    fig = _figure(
+        5.8,
+        "Reinfection risk in calendar time, by exposure history",
+        "600,000 synthetic people (B = Comirnaty dose, I = infection): the same epidemic "
+        "waves, different hazard ratios.",
+        legend=True,
+    )
+    _legend(fig, [Line2D([], [], color=colors[p], lw=3, label=labels[p]) for p in HERO_PROFILES], 4)
+    ax, bx = fig.subplots(1, 2, width_ratios=(2.1, 1))
+
+    days = np.arange(0, 365)
+    frac = _stage(progress, 0, 2) if progress < 1 else 1.0
+    n = max(2, int(frac * len(days)))
+    peak = 0.0
+    for p in HERO_PROFILES:
+        rate = fit.baseline_hazard(days, profile=p) * 1e4
+        peak = max(peak, float(np.max(rate)))
+        ax.plot(
+            days[:n],
+            rate[:n],
+            color=colors[p],
+            lw=3.0 if p == "BBBI" else 2.2,
+            zorder=3 if p == "BBBI" else 2,
+        )
+    ax.set_xlim(-4, 368)
+    ax.set_ylim(0, peak * 1.12)
+    month = np.arange(0, 365, 30.42)
+    ax.set_xticks(month + 15.2, ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"])
+    ax.tick_params(axis="x", length=0)
+    ax.set_title("Daily infections per 10,000 at risk")
+    ax.set_xlabel("Calendar year")
+
+    bars = [p for p in HERO_PROFILES if p != fit.reference]
+    grow = _stage(progress, 1, 2) if progress < 1 else 1.0
+    for i, p in enumerate(bars):
+        e = fit.profile_effect(p)
+        h = 1 - (1 - e.hr) * grow
+        bx.bar(i, h, color=colors[p], width=0.62)
+        if grow >= 1:
+            lo, hi = e.ci
+            bx.plot([i, i], [lo, hi], color=t.ink, lw=1.4, zorder=4)
+            bx.text(
+                i,
+                hi + 0.04,
+                f"{e.hr:.2f}",
+                ha="center",
+                va="bottom",
+                color=t.ink,
+                fontsize=12.5,
+                fontweight="bold",
+            )
+    bx.axhline(1, color=t.ink_3, lw=1.2, ls=(0, (3, 3)))
+    bx.text(len(bars) - 0.5, 1.02, "BB = 1", ha="right", va="bottom", color=t.ink_3, fontsize=10.5)
+    bx.set_xticks(range(len(bars)), bars)
+    bx.set_ylim(0, 1.18)
+    bx.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    bx.set_title("Hazard ratio vs BB")
+    return _save(fig, out)
+
+
+# --------------------------------------------------------------------------- panels
+
+
+def recovery(
     fit: HybridImmunityFit,
-    ax=None,
+    truth: Mapping[str, float],
+    out: Path | BinaryIO,
     *,
-    profiles: Sequence[str] | None = None,
-    truth: Mapping[str, float] | None = None,
-    title: str | None = None,
-):
-    """Hazard ratio of each profile vs the reference, grouped by platform.
-
-    Estimate = dot with 95% CI and end caps; ``truth`` (log HRs) = ink tick.
-    """
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6.4, 4.2), facecolor=PAPER)
-    style_axes(ax)
-    profiles = [p for p in (profiles or fit.profiles) if p != fit.reference]
-    groups: dict[str | None, list[str]] = {}
-    for p in sorted(profiles, key=lambda p: (parse(p).infected, len(p))):
-        groups.setdefault(parse(p).platform, []).append(p)
-    order = [k for k in ("B", "S") if k in groups] + [k for k in groups if k not in ("B", "S")]
-    y, ys, labels, heads = 0.0, [], [], []
-    for g in order:
-        heads.append((y, g))
-        y -= 0.85
-        for p in groups[g]:
-            ys.append((y, p))
-            labels.append(p)
-            y -= 1.0
-        y -= 0.35
-    ref_lhr = (truth or {}).get(fit.reference, 0.0)
-    for yi, p in ys:
+    contrasts: Sequence[tuple[str, str]] = (("BBBI", "BBI"), ("SSSI", "SSI")),
+    progress: float = 1.0,
+) -> Path:
+    """Estimated hazard ratios (dot + 95% CI) against the planted truth (ring)."""
+    t = _theme
+    fig = _figure(
+        7.4,
+        "Checked against a planted ground truth",
+        "One synthetic cohort of 600,000: estimates with 95% CIs (dots) against the values "
+        "the simulator planted (rings).",
+        legend=True,
+    )
+    _legend(
+        fig,
+        [
+            Line2D([], [], color=t.series[0], lw=3, marker="o", ms=7, label="Comirnaty (B)"),
+            Line2D([], [], color=t.series[1], lw=3, marker="o", ms=7, label="CoronaVac (S)"),
+            Line2D(
+                [],
+                [],
+                ls="",
+                marker="o",
+                ms=10,
+                mfc="none",
+                mec=t.ink,
+                mew=1.4,
+                label="planted truth",
+            ),
+        ],
+        3,
+    )
+    ax, bx = fig.subplots(2, 1, height_ratios=(3.1, 1))
+    profiles = [p for p in fit.profiles if p != fit.reference]
+    profiles.sort(key=lambda p: (parse(p).platform or "", parse(p).infected, len(p)))
+    n = len(profiles)
+    for k, p in enumerate(profiles):
+        y = n - 1 - k
+        frac = _stage(progress, k, n) if progress < 1 else 1.0
+        if frac <= 0:
+            continue
         e = fit.profile_effect(p)
         lo, hi = e.ci
-        color = PLATFORM_COLORS.get(parse(p).platform, GRAPH)
-        _whisker(ax, lo, hi, yi, color)
-        ax.plot(e.hr, yi, "o", ms=6.5, color=color, mec=PAPER, mew=1.4, zorder=4)
-        if truth is not None and p in truth:
-            ax.plot(
-                [np.exp(truth[p] - ref_lhr)] * 2, [yi - 0.3, yi + 0.3], color=INK, lw=1.4, zorder=5
+        color = platform_color(p)
+        mid = e.hr
+        _ci(ax, mid - (mid - lo) * frac, mid + (hi - mid) * frac, y, color)
+        _dot(ax, e.hr, y, color)
+        if frac >= 1:
+            _ring(ax, float(np.exp(truth[p] - truth.get(fit.reference, 0.0))), y)
+            ax.text(
+                1.01,
+                y,
+                f"{e.hr:.2f}",
+                transform=ax.get_yaxis_transform(),
+                va="center",
+                color=t.ink,
+                fontsize=11.5,
+                fontweight="bold",
             )
-        ax.text(
-            1.015,
-            yi,
-            f"{e.hr:.2f}",
-            transform=ax.get_yaxis_transform(),
-            va="center",
-            fontproperties=_fp("serif", 10.5),
-            color=INK,
-        )
-    ax.axvline(1, color=GRAPH, lw=0.7, ls=(0, (2, 3)))
-    ax.set_yticks([v for v, _ in ys], labels)
-    for lab in ax.get_yticklabels():
-        lab.set_fontproperties(_fp("label", 11))
-        lab.set_color(INK)
-    ax.tick_params(axis="y", length=0)
-    ax.spines["left"].set_visible(False)
-    ax.set_ylim(y + 0.6, 0.6)
-    hr_axis(ax)
-    for yh, g in heads:
-        caps(
-            ax,
-            0.0,
-            yh - 0.25,
-            f"{PLATFORM_NAMES.get(g or '', 'other')} · {g}",
-            transform=ax.get_yaxis_transform(),
-            color=PLATFORM_COLORS.get(g, GRAPH),
-            ha="left",
-            va="center",
-        )
-    axis_label(ax, f"hazard ratio vs {fit.reference} — log scale, 95% CI")
-    if title:
-        ax.set_title(title, loc="left", fontproperties=_fp("italic", 14), color=INK)
-    return ax
+    ax.axvline(1, color=t.ink_3, lw=1.2, ls=(0, (3, 3)))
+    ax.set_yticks(range(n), profiles[::-1])
+    ax.set_ylim(-0.7, n - 0.3)
+    ax.set_xlim(0.15, 1.6)
+    _log_axis(ax, (0.2, 0.3, 0.5, 0.7, 1, 1.5))
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True)
+    ax.set_title(f"Each history vs {fit.reference}")
+    ax.set_xlabel("Hazard ratio (log scale)")
 
-
-def contrasts(
-    fit: HybridImmunityFit,
-    pairs: Sequence[tuple[str, str]],
-    ax=None,
-    *,
-    truth: Mapping[str, float] | None = None,
-    ticks=(0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2),
-):
-    """Hazard ratios of profile pairs (e.g. the imprinting contrast BBBI vs BBI)."""
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6.4, 2.4), facecolor=PAPER)
-    style_axes(ax)
-    for k, (a, b) in enumerate(pairs):
-        yk = -k
+    last = _stage(progress, n - 1, n) if progress < 1 else 1.0
+    for k, (a, b) in enumerate(contrasts):
+        y = len(contrasts) - 1 - k
+        if last < 1:
+            continue
         c = fit.contrast(a, b)
         lo, hi = c.ci
-        color = PLATFORM_COLORS.get(parse(a).platform, GRAPH)
-        if lo > 1:  # the data that matters: an interval clear of 1
-            ax.axhspan(yk - 0.32, yk + 0.32, xmin=0, xmax=1, color=ORANGE, alpha=0.06, lw=0)
-        _whisker(ax, lo, hi, yk, color, cap=0.16, lw=2)
-        ax.plot(c.hr, yk, "o", ms=7.5, color=color, mec=PAPER, mew=1.5, zorder=4)
-        if truth is not None:
-            t = np.exp(truth[a] - truth[b])
-            ax.plot([t, t], [yk - 0.3, yk + 0.3], color=INK, lw=1.4, zorder=5)
-        ax.text(
-            1.015,
-            yk,
+        color = platform_color(a)
+        _ci(bx, lo, hi, y, color, lw=2.6)
+        _dot(bx, c.hr, y, color, s=70)
+        _ring(bx, float(np.exp(truth[a] - truth[b])), y)
+        bx.text(
+            1.01,
+            y,
             f"{c.hr:.2f}  ({lo:.2f}–{hi:.2f})",
-            transform=ax.get_yaxis_transform(),
+            transform=bx.get_yaxis_transform(),
             va="center",
-            fontproperties=_fp("serif", 10.5),
-            color=INK,
+            color=t.ink,
+            fontsize=11.5,
         )
-    ax.axvline(1, color=GRAPH, lw=0.7, ls=(0, (2, 3)))
-    ax.set_yticks([-k for k in range(len(pairs))], [f"{a}  vs  {b}" for a, b in pairs])
-    for lab in ax.get_yticklabels():
-        lab.set_fontproperties(_fp("label", 11))
-        lab.set_color(INK)
-    ax.tick_params(axis="y", length=0)
-    ax.spines["left"].set_visible(False)
-    ax.set_ylim(-len(pairs) + 0.45, 0.55)
-    hr_axis(ax, ticks=ticks)
-    return ax
+    bx.axvline(1, color=t.ink_3, lw=1.2, ls=(0, (3, 3)))
+    bx.set_yticks(range(len(contrasts)), [f"{a} vs {b}" for a, b in contrasts][::-1])
+    bx.set_ylim(-0.6, len(contrasts) - 0.4)
+    bx.set_xlim(0.75, 1.75)
+    _log_axis(bx, (0.8, 0.9, 1, 1.1, 1.25, 1.5))
+    bx.grid(axis="y", visible=False)
+    bx.grid(axis="x", visible=True)
+    bx.set_title("The imprinting contrast: one extra dose before infection")
+    return _save(fig, out)
 
 
-def ridge(ax, x, y, *, offsets=(0.06, 0.12, 0.19, 0.27, 0.36), color=INK, lw=1.6):
-    """The website's engraved ridge: a crest line with fading offset hatching below.
-
-    ``offsets`` are fractions of the y-range.
-    """
-    span = np.nanmax(y) - np.nanmin(y)
-    for i, o in enumerate(offsets):
-        ax.plot(
-            x,
-            np.maximum(y - o * span, np.nanmin(y)),
-            color=GRAPH,
-            lw=0.45,
-            alpha=max(0.12, 0.75 - i * 0.14),
-            zorder=2,
-        )
-    ax.plot(x, y, color=color, lw=lw, solid_capstyle="round", zorder=3)
-
-
-def trend(fit: HybridImmunityFit, agg: pd.DataFrame, ax=None, *, title: str | None = None):
-    """Observed daily incidence in the reference cell with the fitted calendar curve."""
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6.4, 3.2), facecolor=PAPER)
-    style_axes(ax, grid="y")
+def calendar(fit: HybridImmunityFit, agg: pd.DataFrame, out: Path | BinaryIO) -> Path:
+    """Observed daily incidence in the reference cell and the fitted calendar curve."""
+    t = _theme
+    fig = _figure(
+        4.6,
+        "Calendar time absorbs the epidemic curve",
+        "Reference cell (BB, female, 18–59): observed daily rate and the fitted cubic "
+        "B-spline baseline (7 degrees of freedom).",
+        legend=True,
+    )
+    _legend(
+        fig,
+        [
+            Line2D([], [], ls="", marker="o", ms=5, color=t.ink_3, label="observed"),
+            Line2D([], [], color=t.series[0], lw=3, label="fitted baseline"),
+        ],
+        2,
+    )
+    ax = fig.subplots()
     ref = agg[agg["profile"] == fit.reference]
     for col, lev in fit.covariate_refs.items():
         ref = ref[ref[col].astype(str) == lev]
     daily = ref.groupby("day")[["events", "at_risk"]].sum()
     rate = daily["events"] / daily["at_risk"] * 1e4
-    ax.plot(rate.index, rate.values, "o", ms=2.1, color=GRAPH, alpha=0.55, mew=0, zorder=1)
-    days = np.arange(agg["day"].min(), agg["day"].max() + 1)
-    curve = fit.baseline_hazard(days) * 1e4
-    ridge(ax, days, curve)
+    ax.scatter(rate.index, rate.values, s=9, color=t.ink_3, alpha=0.7, lw=0, zorder=2)
+    days = np.arange(int(agg["day"].min()), int(agg["day"].max()) + 1)
+    ax.plot(days, fit.baseline_hazard(days) * 1e4, color=t.series[0], lw=2.8, zorder=3)
     ax.set_ylim(0, None)
     ax.set_xlim(days[0] - 4, days[-1] + 4)
-    # peaks, marked in orange and hand-lettered
-    from scipy.signal import find_peaks
-
-    peaks, _ = find_peaks(curve, prominence=float(np.max(curve)) * 0.2)
-    for k, pk in enumerate(peaks[:2]):
-        ax.plot(days[pk], curve[pk], "o", ms=5, color=ORANGE, zorder=5)
-        hand(ax, days[pk] + 9, curve[pk] * 1.02, ["first wave", "second wave"][k], size=12.5)
-    month0 = np.arange(0, 365, 30.42)
-    ax.set_xticks(month0 + 15.2, list("JFMAMJJASOND")[: len(month0)])
+    month = np.arange(0, 365, 30.42)
+    ax.set_xticks(month + 15.2, ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"])
     ax.tick_params(axis="x", length=0)
-    _tick_fonts(ax)
-    axis_label(ax, "daily infections per 10,000 at risk", which="y")
-    if title:
-        ax.set_title(title, loc="left", fontproperties=_fp("italic", 14), color=INK)
-    return ax
+    ax.set_ylabel("Infections per 10,000 at risk")
+    return _save(fig, out)
 
 
 def waning(
     fit: HybridImmunityFit,
-    ax=None,
+    out: Path | BinaryIO,
     *,
     name: str = "since",
     truth: Mapping[str, float] | None = None,
-):
-    """Hazard ratio by time since the last exposure (a step chart with hatching)."""
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6.4, 3.2), facecolor=PAPER)
-    style_axes(ax, grid="y")
-    eff = fit.covariate_effects(name)
-    x = np.arange(len(eff))
-    hrs = np.array([e.hr for e in eff])
-    for xi, e in zip(x, eff, strict=True):
-        ax.fill_between(
-            [xi - 0.36, xi + 0.36],
-            1,
-            e.hr,
-            color="none",
-            edgecolor=GRAPH,
-            hatch="////",
-            lw=0,
-            alpha=0.55,
-            zorder=1,
+) -> Path:
+    """Hazard ratio by time since the last exposure, against the planted values."""
+    t = _theme
+    fig = _figure(
+        4.8,
+        "Protection wanes with time since the last exposure",
+        "A covariate that changes during follow-up: people move between bands, and the "
+        "aggregated fit stays exact.",
+        legend=truth is not None,
+    )
+    if truth is not None:
+        _legend(
+            fig,
+            [
+                Patch(color=t.ramp[2], label="estimate, 95% CI"),
+                Line2D(
+                    [],
+                    [],
+                    ls="",
+                    marker="o",
+                    ms=10,
+                    mfc="none",
+                    mec=t.ink,
+                    mew=1.4,
+                    label="planted truth",
+                ),
+            ],
+            2,
         )
-        ax.plot([xi - 0.36, xi + 0.36], [e.hr, e.hr], color=INK, lw=1.6, zorder=3)
+    ax = fig.subplots()
+    eff = fit.covariate_effects(name)
+    colors = (
+        list(t.ramp[1 : 1 + len(eff)]) if len(eff) <= len(t.ramp) - 1 else [t.ramp[2]] * len(eff)
+    )
+    for i, e in enumerate(eff):
+        ax.bar(i, e.hr, color=colors[i], width=0.6)
+        top = e.hr
         if np.isfinite(e.se):
             lo, hi = e.ci
-            ax.plot([xi, xi], [lo, hi], color=ORANGE, lw=1.6, zorder=4)
-            for v in (lo, hi):
-                ax.plot([xi - 0.06, xi + 0.06], [v, v], color=ORANGE, lw=0.9, zorder=4)
-        ax.plot(
-            xi,
-            e.hr,
-            "o",
-            ms=5.5,
-            color=ORANGE if np.isfinite(e.se) else INK,
-            mec=PAPER,
-            mew=1.2,
-            zorder=5,
+            ax.plot([i, i], [lo, hi], color=t.ink, lw=1.4, zorder=4)
+            top = hi
+        ax.text(
+            i,
+            top + 0.04,
+            f"{e.hr:.2f}",
+            ha="center",
+            va="bottom",
+            color=t.ink,
+            fontsize=12.5,
+            fontweight="bold",
         )
-        if truth is not None and e.term in truth:
-            t = np.exp(truth[e.term] - truth.get(eff[0].term, 0.0))
-            ax.plot([xi - 0.2, xi + 0.2], [t, t], color=INK, lw=1.3, ls=(0, (1, 1.5)), zorder=6)
-    ax.axhline(1, color=GRAPH, lw=0.7, ls=(0, (2, 3)))
-    ax.plot(x, hrs, color=INK, lw=0.6, ls=(0, (3, 3)), zorder=2)
+        if truth is not None and e.term in truth and i > 0:
+            _ring(ax, i, float(np.exp(truth[e.term] - truth.get(eff[0].term, 0.0))))
+    ax.axhline(1, color=t.ink_3, lw=1.2, ls=(0, (3, 3)))
 
-    def _band(term: str) -> str:
-        if term.endswith("d+"):
-            return f"{term[:-2]}+ days"
-        return term.replace("-", "–").replace("d", " days")
+    def band(term: str) -> str:
+        return (
+            f"{term[:-2]}+ days" if term.endswith("d+") else term.replace("-", "–")[:-1] + " days"
+        )
 
-    ax.set_xticks(x, [_band(e.term) for e in eff])
-    _tick_fonts(ax, 10.5)
-    ax.set_xlim(-0.6, len(eff) - 0.4)
-    ax.set_ylim(0.9, max(float(np.max(hrs)), 1.0) * 1.12)
-    axis_label(ax, "hazard ratio vs the first band", which="y")
-    axis_label(ax, "days since the last dose or infection")
-    return ax
+    ax.set_xticks(range(len(eff)), [band(e.term) for e in eff])
+    ax.set_ylim(0, max(float(np.max([e.hr for e in eff])), 1.0) * 1.22)
+    ax.set_ylabel("Hazard ratio vs the first band")
+    ax.set_xlabel("Time since the last dose or infection")
+    return _save(fig, out)
 
 
 def power_curves(
     sizes: np.ndarray,
     curves: Mapping[str, np.ndarray],
-    ax=None,
+    out: Path | BinaryIO,
     *,
     simulated: Mapping[str, tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None,
     markers: Mapping[str, float] | None = None,
-):
-    """Power against cohort size; one curve per effect size (sequential amber→rust).
-
-    ``simulated`` maps a curve label to Monte-Carlo ``(sizes, power, half_width)``.
-    ``markers`` draws labelled vertical rules at named cohort sizes.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import FuncFormatter
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(6.4, 3.4), facecolor=PAPER)
-    style_axes(ax, grid="y")
-    ramp = [AMBER, ORANGE, RUST, INK]
-    for (label, pw), color in zip(curves.items(), ramp, strict=False):
-        ax.plot(sizes, pw, color=color, lw=1.8, zorder=3)
-        j = int(np.argmin(np.abs(pw - 0.62)))
-        hand(ax, sizes[j] / 1.1, pw[j] + 0.03, label, color=color, size=12, ha="right")
-        if simulated and label in simulated:
+    progress: float = 1.0,
+) -> Path:
+    """Power of a contrast against cohort size, one curve per true effect."""
+    t = _theme
+    labels = list(curves)
+    colors = dict(zip(labels, t.ramp[-len(labels) :], strict=True))
+    fig = _figure(
+        5.2,
+        "A sub-sample cannot see small effects",
+        "Imprinting test (BBBI vs BBI, two-sided 5%): analytic curves from one fit; dots are "
+        "30 simulated cohorts.",
+        legend=True,
+    )
+    _legend(fig, [Line2D([], [], color=colors[k], lw=3, label=f"true {k}") for k in labels], 3)
+    ax = fig.subplots()
+    for name, n in (markers or {}).items():
+        ax.axvline(n, color=t.ink_3, lw=1.2, ls=(0, (3, 3)), zorder=1)
+        ax.text(n * 1.04, 0.04, name, color=t.ink_2, fontsize=11, va="bottom")
+    m = len(sizes)
+    for k, label in enumerate(labels):
+        frac = _stage(progress, k, len(labels)) if progress < 1 else 1.0
+        if frac <= 0:
+            continue
+        upto = max(2, int(frac * m))
+        ax.plot(sizes[:upto], curves[label][:upto], color=colors[label], lw=2.6, zorder=3)
+        if simulated and label in simulated and frac >= 1:
             sx, sp, hw = simulated[label]
             ax.errorbar(
                 sx,
                 sp,
                 yerr=hw,
                 fmt="o",
-                ms=5.5,
-                color=color,
-                mec=PAPER,
-                mew=1.2,
-                elinewidth=0.9,
-                capsize=2.5,
+                ms=7,
+                color=colors[label],
+                mec=t.surface,
+                mew=1.6,
+                elinewidth=1.4,
+                capsize=0,
                 zorder=5,
             )
-    ax.axhline(0.8, color=GRAPH, lw=0.6, ls=(0, (2, 3)))
-    ax.text(
-        sizes[0],
-        0.815,
-        spaced("80% power"),
-        fontproperties=_fp("label", 8),
-        color=GRAPH,
-        va="bottom",
-    )
-    for name, n in (markers or {}).items():
-        ax.axvline(n, color=INK, lw=0.7)
-        hand(ax, n * 1.05, 0.06, name, size=11.5, color=INK)
+    ax.axhline(0.8, color=t.ink_3, lw=1.0, zorder=1)
+    ax.text(sizes[0], 0.81, "80% power", color=t.ink_3, fontsize=10.5, va="bottom")
     ax.set_xscale("log")
-    from matplotlib.ticker import FixedLocator, NullLocator
-
     ax.xaxis.set_major_locator(FixedLocator([3e4, 1e5, 3e5, 1e6, 3e6]))
     ax.xaxis.set_minor_locator(NullLocator())
-    ax.xaxis.set_major_formatter(
-        FuncFormatter(lambda v, _: f"{v / 1e6:g}M" if v >= 1e6 else f"{v / 1e3:g}k")
-    )
-    ax.set_ylim(0, 1.02)
+    ax.xaxis.set_major_formatter(FuncFormatter(_people))
+    ax.set_xlim(sizes[0], sizes[-1])
+    ax.set_ylim(0, 1.03)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0%}"))
-    _tick_fonts(ax)
-    axis_label(ax, "people in the cohort")
-    axis_label(ax, "power to detect the contrast", which="y")
-    return ax
+    ax.set_xlabel("People in the cohort")
+    return _save(fig, out)
 
 
 def histories(
     people: pd.DataFrame,
     exposures: pd.DataFrame,
     events: pd.DataFrame,
-    ax=None,
+    out: Path | BinaryIO,
     *,
     blank_days: int = 28,
     horizon: int = 365,
-    curve: np.ndarray | None = None,
-):
-    """Swimmer lanes: dated doses and infections, then calendar follow-up.
-
-    One lane per person: dose glyphs coloured by platform, the first infection as an
-    ink dot, the at-risk follow-up as a ruled line, the 28-day episode window as a
-    hatched gap, later infections in orange, censoring as a short bar.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Rectangle
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 5), facecolor=PAPER)
-    style_axes(ax, grid="")
-    ax.spines["left"].set_visible(False)
+) -> Path:
+    """Swimmer lanes: dated doses and infections, then calendar follow-up."""
+    t = _theme
+    fig = _figure(
+        6.6,
+        "Exposure histories become calendar-time risk sets",
+        "Sixteen synthetic people: doses and a first infection before day 0, then follow-up "
+        "with reinfections.",
+        legend=True,
+    )
+    _legend(
+        fig,
+        [
+            Line2D(
+                [], [], ls="", marker="|", ms=12, mew=2.6, color=t.series[0], label="Comirnaty dose"
+            ),
+            Line2D(
+                [], [], ls="", marker="|", ms=12, mew=2.6, color=t.series[1], label="CoronaVac dose"
+            ),
+            Line2D([], [], ls="", marker="o", ms=8, color=t.ink, label="first infection"),
+            Line2D([], [], ls="", marker="D", ms=7, color=t.series[2], label="reinfection"),
+            Patch(color=t.grid, label="episode window"),
+        ],
+        5,
+    )
+    ax = fig.subplots()
     ppl = people.reset_index(drop=True)
     n = len(ppl)
-    lo_day = int(min(exposures["day"].min(), 0)) - 15
-    ax.axvspan(0, horizon, color=INK, alpha=0.025, lw=0, zorder=0)
-    ax.axvline(0, color=INK, lw=0.8, zorder=1)
-    caps(ax, 4, n - 0.15, "follow-up", color=INK, va="bottom")
-    caps(ax, -6, n - 0.15, "exposure history", ha="right", va="bottom")
-    if curve is not None:  # epidemic ridge above the lanes
-        t = np.arange(horizon)
-        y = n + 0.55 + 2.6 * curve / float(np.max(curve))
-        ridge(ax, t, y, offsets=(0.08, 0.16, 0.25), lw=1.2)
+    lo_day = int(min(exposures["day"].min(), 0)) - 20
+    ax.axvspan(0, horizon, color=t.soft[0], lw=0, zorder=0, alpha=0.5)
     for i, row in ppl.iterrows():
-        yi = n - 1 - i
+        y = n - 1 - int(cast(int, i))
         pid = row["id"]
-        ax.plot([lo_day + 10, horizon], [yi, yi], color=FAINT, lw=0.4, zorder=1)
+        ax.plot([lo_day, horizon], [y, y], color=t.grid, lw=1.0, zorder=1)
         ex = exposures[exposures["id"] == pid]
         for _, e in ex.iterrows():
             if e["kind"] == "infection":
-                ax.plot(e["day"], yi, "o", ms=6.2, color=INK, mec=PAPER, mew=1.0, zorder=4)
+                ax.scatter(
+                    [e["day"]], [y], s=46, color=t.ink, zorder=4, edgecolor=t.surface, linewidth=1.2
+                )
             else:
-                sym = "B" if "omirn" in e["kind"] else "S"
+                c = t.series[0] if "omirn" in str(e["kind"]) else t.series[1]
                 ax.plot(
                     [e["day"]] * 2,
-                    [yi - 0.26, yi + 0.26],
-                    color=PLATFORM_COLORS[sym],
-                    lw=2.0,
-                    solid_capstyle="butt",
+                    [y - 0.28, y + 0.28],
+                    color=c,
+                    lw=2.6,
                     zorder=3,
+                    solid_capstyle="butt",
                 )
-        # follow-up: entry .. exit with blanked windows after each event
         a, end = int(row["entry"]), int(row["exit"])
-        evs = sorted(events.loc[events["id"] == pid, "day"].tolist())
-        for d in evs:
-            ax.plot([a, d], [yi, yi], color=INK, lw=1.3, zorder=2)
+        for d in sorted(events.loc[events["id"] == pid, "day"].tolist()):
+            ax.plot([a, d], [y, y], color=t.ink_2, lw=2.0, zorder=2)
             ax.add_patch(
-                Rectangle(
-                    (d, yi - 0.2),
-                    blank_days,
-                    0.4,
-                    facecolor="none",
-                    edgecolor=GRAPH,
-                    hatch="//////",
-                    lw=0,
-                    zorder=2,
-                )
+                plt.Rectangle((d, y - 0.22), blank_days, 0.44, color=t.grid, lw=0, zorder=2)
             )
-            ax.plot(d, yi, "o", ms=5.6, color=ORANGE, mec=PAPER, mew=1.0, zorder=5)
+            ax.scatter(
+                [d],
+                [y],
+                s=36,
+                marker="D",
+                color=t.series[2],
+                zorder=5,
+                edgecolor=t.surface,
+                linewidth=1.0,
+            )
             a = d + 1 + blank_days
         if a < end:
-            ax.plot([a, end], [yi, yi], color=INK, lw=1.3, zorder=2)
-        if end < horizon:
-            ax.plot([end, end], [yi - 0.22, yi + 0.22], color=INK, lw=1.2, zorder=3)
-        ax.text(
-            lo_day,
-            yi,
-            row["profile"],
-            fontproperties=_fp("label", 10.5),
-            color=INK,
-            ha="right",
-            va="center",
-        )
-    ax.set_yticks([])
-    ax.set_xlim(lo_day - 8, horizon + 6)
-    ax.set_ylim(-0.8, n + (4.0 if curve is not None else 0.6))
-    ticks = [t for t in range(-720, 1, 90)] + [90, 180, 270, 365]
-    ticks = [t for t in ticks if t >= lo_day]
-    ax.set_xticks(ticks, [f"{t:+d}" if t else "day 0" for t in ticks])
-    _tick_fonts(ax, 9.5)
-    return ax
+            ax.plot([a, end], [y, y], color=t.ink_2, lw=2.0, zorder=2)
+    ax.axvline(0, color=t.ink_2, lw=1.2, zorder=1)
+    ax.set_yticks(range(n), ppl["profile"].tolist()[::-1])
+    ax.set_ylim(-0.7, n - 0.3)
+    ax.grid(axis="y", visible=False)
+    ticks = [d for d in range(-720, 1, 180)] + [180, 365]
+    ax.set_xticks(
+        [d for d in ticks if d >= lo_day],
+        [f"{d:+d}" if d else "day 0" for d in ticks if d >= lo_day],
+    )
+    ax.set_xlim(lo_day, horizon + 6)
+    ax.set_xlabel("Days relative to the start of follow-up")
+    return _save(fig, out)
 
 
-def benchmark(rows: pd.DataFrame, axes=None):
-    """Build+fit time and peak memory against cohort size, naive vs aggregated.
-
-    ``rows`` has columns ``pipeline, people, seconds, mib``.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import FuncFormatter
-
-    if axes is None:
-        _, axes = plt.subplots(1, 2, figsize=(8.6, 3.4), facecolor=PAPER)
-    fmt_n = FuncFormatter(lambda v, _: f"{v / 1e6:g}M" if v >= 1e6 else f"{v / 1e3:g}k")
-    for ax, col, label, unit in (
-        (axes[0], "seconds", "build + fit time", "s"),
-        (axes[1], "mib", "peak memory", "MiB"),
+def benchmark(rows: pd.DataFrame, out: Path | BinaryIO) -> Path:
+    """Build + fit time and peak memory against cohort size, naive vs aggregated."""
+    t = _theme
+    fig = _figure(
+        7.2,
+        "Same likelihood, a table that does not grow",
+        "Synthetic cohorts on 2 vCPU / 7 GB RAM: the person-day panel runs out of memory "
+        "past ~5,000 people.",
+        legend=True,
+    )
+    _legend(
+        fig,
+        [
+            Line2D([], [], color=t.ink_3, lw=3, marker="o", ms=6, label="person-day GLM"),
+            Line2D([], [], color=t.series[0], lw=3, marker="o", ms=6, label="vvi, aggregated"),
+        ],
+        2,
+    )
+    axes = fig.subplots(2, 1, sharex=True)
+    for ax, col, title, unit in (
+        (axes[0], "seconds", "Build + fit time", "s"),
+        (axes[1], "mib", "Peak memory", "MiB"),
     ):
-        style_axes(ax, grid="y")
-        for name, color, lw in (("person-day", INK, 1.3), ("aggregated", ORANGE, 2.0)):
+        for name, color in (("person-day", t.ink_3), ("aggregated", t.series[0])):
             r = rows[rows["pipeline"] == name].sort_values("people")
-            ax.plot(
-                r["people"], r[col], "-o", color=color, lw=lw, ms=4.5, mec=PAPER, mew=1.0, zorder=3
+            ax.plot(r["people"], r[col], color=color, lw=2.6, zorder=3)
+            ax.scatter(
+                r["people"], r[col], s=40, color=color, edgecolor=t.surface, linewidth=1.6, zorder=4
             )
             last = r.iloc[-1]
-            if name == "person-day":
-                ax.plot(last["people"], last[col], marker="x", ms=8, mew=1.4, color=INK, zorder=4)
-                hand(
-                    ax,
-                    last["people"] * 1.25,
-                    last[col],
-                    "out of memory next",
-                    size=11.5,
-                    va="center",
-                )
-            else:
-                hand(
-                    ax,
-                    last["people"] * 0.7,
-                    last[col] * 1.12,
-                    f"vvi · 1M people · {last[col]:,.0f} {unit}",
-                    color=ORANGE,
-                    size=11.5,
-                    ha="right",
-                    va="bottom",
-                )
-        ax.set_xscale("log")
+            text = (
+                f"{last[col]:,.0f} {unit} for {_people(last['people'])}"
+                if name == "aggregated"
+                else f"{last[col]:,.0f} {unit} for 5k"
+            )
+            ax.annotate(
+                text,
+                (last["people"], last[col]),
+                xytext=(8, 0),
+                textcoords="offset points",
+                va="center",
+                color=t.ink,
+                fontsize=11,
+                fontweight="bold",
+            )
         ax.set_yscale("log")
-        ax.xaxis.set_major_formatter(fmt_n)
         ax.yaxis.set_major_formatter(
             FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 1 else f"{v:g}")
         )
-        _tick_fonts(ax)
-        caps(ax, 0.0, 1.04, f"{label} ({unit})", transform=ax.transAxes, color=INK)
-        axis_label(ax, "people in the cohort")
-    return axes
+        ax.set_title(f"{title} ({unit})")
+    axes[1].set_xscale("log")
+    axes[1].xaxis.set_major_locator(FixedLocator([1e3, 1e4, 1e5, 1e6]))
+    axes[1].xaxis.set_minor_locator(NullLocator())
+    axes[1].xaxis.set_major_formatter(FuncFormatter(_people))
+    axes[1].set_xlim(700, 3.2e6)
+    axes[1].set_xlabel("People in the cohort")
+    return _save(fig, out)
+
+
+# --------------------------------------------------------------------------- social card
+
+
+def social_preview(fit: HybridImmunityFit, out: Path) -> Path:
+    """1280×640 repository social preview."""
+    t = _theme
+    fig = plt.figure(figsize=(12.8, 6.4))
+    fig.text(0.06, 0.84, "VVI", fontsize=40, fontweight="bold", color=t.ink, va="top")
+    fig.text(
+        0.06,
+        0.66,
+        "Hybrid immunity and immune imprinting in calendar time",
+        fontsize=21,
+        color=t.ink_2,
+        va="top",
+    )
+    fig.text(
+        0.06,
+        0.57,
+        "Exact, sampling-free hazard models for vaccination–infection histories",
+        fontsize=15,
+        color=t.ink_3,
+        va="top",
+    )
+    ax = fig.add_axes((0.06, 0.08, 0.88, 0.38))
+    days = np.arange(365)
+    colors = (t.ink_3, t.ramp[2], t.series[2], t.series[1])
+    for p, c in zip(HERO_PROFILES, colors, strict=True):
+        ax.plot(days, fit.baseline_hazard(days, profile=p), color=c, lw=4.5)
+    ax.axis("off")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=100)
+    plt.close(fig)
+    return out
+
+
+# --------------------------------------------------------------------------- animation
+
+
+def animate(
+    render: Callable[[BinaryIO, float], object],
+    out: Path,
+    *,
+    frames: int = 44,
+    frame_ms: int = 55,
+    hold_ms: int = 3200,
+    dpi: float = 150,
+) -> Path:
+    """Render ``render(buffer, progress)`` for progress 0..1 and write an optimised GIF.
+
+    The last frame is held so the finished chart stays on screen before the loop restarts.
+    Frames are quantised to a shared adaptive palette to keep files small.
+    """
+    from PIL import Image
+
+    images = []
+    for i in range(frames):
+        buffer = io.BytesIO()
+        with plt.rc_context({"savefig.dpi": dpi}):
+            render(buffer, (i + 1) / frames)
+        buffer.seek(0)
+        images.append(Image.open(buffer).convert("RGB"))
+    palette = images[-1].quantize(colors=128, method=Image.Quantize.MEDIANCUT)
+    frames_p = [img.quantize(palette=palette, dither=Image.Dither.NONE) for img in images]
+    durations = [frame_ms] * (frames - 1) + [hold_ms]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    frames_p[0].save(
+        out,
+        save_all=True,
+        append_images=frames_p[1:],
+        duration=durations,
+        loop=0,
+        optimize=True,
+        disposal=1,
+    )
+    return out

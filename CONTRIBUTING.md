@@ -7,7 +7,7 @@ Thank you for your interest in VVI. Issues and pull requests are welcome.
 ```bash
 git clone https://github.com/EllenSyuu/VVI && cd VVI
 pip install -e ".[dev]"
-pytest --cov            # 35 tests, ~2 minutes
+pytest --cov            # 38 tests, ~3 minutes
 ruff check src tests scripts && ruff format --check src tests scripts && mypy
 ```
 

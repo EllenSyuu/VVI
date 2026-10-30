@@ -47,3 +47,6 @@ htmlcov/
 .vscode/
 .Rhistory
 .Rproj.user/
+
+# build outputs
+build/

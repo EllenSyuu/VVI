@@ -15,10 +15,13 @@ All notable changes to this project are documented here. The format follows
 - **Dated histories.** `vvi.histories` back-fills doses and infections consistent with each
   synthetic profile; `vvi.encode_table` encodes a long event table per person.
 - `fit(covariates=...)` accepts any categorical covariate and a `{name: reference}` mapping.
-- Interactive explorer (`site/`, GitHub Pages) with 21 simulated-and-fitted scenarios.
-- Atelier figure system in `vvi.plots` (bundled OFL fonts, paper grain), six new plates,
-  an animated hero plate and pipeline diagram.
-- Tutorial notebook, `py.typed`, mypy and coverage gates in CI.
+- Static, dependency-free interactive explorer (`docs/explorer`, built by
+  `scripts/build_site.py`, deployed on demand to GitHub Pages) with 21 scenarios.
+- `vvi.plots` rebuilt on a light/dark theme system: hero, recovery, calendar, waning,
+  power, histories and benchmark figures, plus GIF animation; `scripts/render_assets.py`
+  re-renders every README image from synthetic data.
+- Tutorial notebook, Makefile, NOTICE, figure smoke tests, `py.typed`, mypy and coverage
+  gates in CI.
 
 ### Changed
 - The simulator records each person's last exposure (`anchor`); optional waning effect.

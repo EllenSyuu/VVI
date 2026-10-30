@@ -27,7 +27,7 @@ dependencies = ["numpy>=1.24", "pandas>=2.0", "scipy>=1.10", "statsmodels>=0.14"
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7", "pillow>=9"]
-dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.5", "mypy>=1.8", "matplotlib>=3.7", "pillow>=9", "fonttools>=4.40", "brotli>=1.0"]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.5", "mypy>=1.8", "matplotlib>=3.7", "pillow>=9", "nbformat>=5", "nbclient>=0.9", "ipykernel>=6"]
 
 [project.scripts]
 vvi = "vvi.cli:main"
@@ -41,7 +41,7 @@ Changelog = "https://github.com/EllenSyuu/VVI/blob/main/CHANGELOG.md"
 packages = ["src/vvi"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["site", "docs/figures/*.png"]
+exclude = ["build", "docs/img"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -65,8 +65,7 @@ check_untyped_defs = true
 
 [tool.coverage.run]
 source = ["vvi"]
-omit = ["*/vvi/plots.py", "*/vvi/cli.py"]
+omit = ["*/vvi/cli.py"]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/draw_pipeline.py" = ["E501"]
 "scripts/make_notebook.py" = ["E501"]

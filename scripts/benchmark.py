@@ -1,7 +1,7 @@
 """Benchmark: naive person-day GLM vs the aggregated sufficient-statistics GLM.
 
     python scripts/benchmark.py   # writes docs/results/benchmark.json and docs/benchmark.md
-    python scripts/make_figures.py   # then redraws docs/figures/benchmark.png
+    python scripts/render_assets.py  # then redraws docs/img/benchmark-*.png
 
 Both pipelines produce identical estimates (see tests); this measures cost only.
 """

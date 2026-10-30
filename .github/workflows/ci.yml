@@ -43,6 +43,3 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest --cov --cov-report=term-missing --cov-fail-under=90
       - run: vvi demo --n 200000
-      - name: Figures render from a clean install
-        if: matrix.python-version == '3.12'
-        run: python -c "import matplotlib; matplotlib.use('Agg'); import vvi.plots as P; P.fonts(); print('fonts ok')"

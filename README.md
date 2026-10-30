@@ -1,189 +1,202 @@
 <div align="center">
 
-<a href="https://ellensyuu.github.io/VVI/"><img src="docs/figures/plate.svg" alt="Planche III: an architect's elevation of Victoria Harbour whose ridge traces 2022's two Omicron waves; person-days settle into a ledger of sufficient statistics" width="100%"></a>
+# VVI: Hybrid Immunity in Calendar Time
 
-# VVI · Hybrid Immunity in Calendar Time
+**Does a booster before your first Omicron infection protect you, or imprint you?**
 
-**Does a booster before your first Omicron infection protect you — or *imprint* you?**<br>
-An exact, sampling-free hazard model for vaccination–infection histories, as a tested Python package.
+A Python toolkit that fits exact, sampling-free discrete-time hazard models to
+vaccination–infection histories, and estimates hybrid immunity, immune imprinting,
+waning and the cohort size each question needs.
 
 [![CI](https://github.com/EllenSyuu/VVI/actions/workflows/ci.yml/badge.svg)](https://github.com/EllenSyuu/VVI/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-22314a)
-![Typed](https://img.shields.io/badge/typing-mypy%20clean-22314a)
-![License](https://img.shields.io/badge/license-Apache--2.0-6f7b8c)
-![Data](https://img.shields.io/badge/data-synthetic%20only-cf602b)
+![Python 3.10–3.13](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-3776AB?logo=python&logoColor=white)
+![statsmodels](https://img.shields.io/badge/models-statsmodels-4051B5)
+![mypy](https://img.shields.io/badge/types-mypy-2A6DB2)
+![Ruff](https://img.shields.io/badge/lint-Ruff-D7FF64)
+![Coverage 97%](https://img.shields.io/badge/coverage-97%25-1BAF7A)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-[**Interactive explorer**](https://ellensyuu.github.io/VVI/) ·
-[Method](docs/method.md) ·
-[Benchmark](docs/benchmark.md) ·
-[Power study](docs/power.md) ·
-[Tutorial notebook](examples/quickstart.ipynb)
+**[Live explorer](https://ellensyuu.github.io/VVI/)** · [Why](#why) · [Quick start](#quick-start) · [What it estimates](#what-it-estimates) · [Validation](#validated-against-a-planted-ground-truth) · [Engineering](#engineering) · [Docs](docs/)
 
 </div>
 
----
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/hero-dark.gif">
+  <img alt="Animation: fitted daily infection rates over 2022 for four vaccination–infection histories, then their hazard ratios against two doses" src="docs/img/hero-light.gif" width="100%">
+</picture>
 
-## At a glance
+<sub>All figures and animations in this repository are generated from **synthetic data** by `scripts/render_assets.py`. The repository contains no real data.</sub>
 
-| | |
-|---|---|
-| **Question** | How protective is each vaccination–infection history (`BBI`, `BBBI`, `SSSI`, …) against reinfection — and does an extra pre-infection dose *raise* reinfection risk (immune imprinting)? |
-| **Model** | Discrete-time cloglog hazard in **calendar time** — the grouped-time form of an Andersen–Gill model — with a B-spline epidemic baseline. `exp(β)` is a hazard ratio. |
-| **Key idea** | The likelihood depends on the data only through *people at risk* and *events* per covariate cell and day. Fitting those counts gives the **same estimates and standard errors** as the person-day model, on a table that does not grow with the cohort. |
-| **Result** | 1,000,000 people (314 M person-days) fit in **13 s and 0.3 GB**; the naive person-day fit needs 72 s and 5.3 GB for **5,000** people. Aggregated and person-day estimates agree to 10⁻⁷. |
-| **Why it matters** | No sub-sampling: a 300k sub-sample has **27%** power to detect an imprinting HR of 1.10; the full ~1.5M cohort has **85%**. |
-| **Extensions** | Waning by time since last exposure (a covariate that changes during follow-up) — still exact. Wald power and required cohort size from a single fit. |
-| **Validation** | 35 tests, 97% coverage: encoding rules, count identities, exact equivalence, recovery of planted effects, Monte-Carlo checks of power and test size. |
+## Why
 
-## Why this exists
+Hong Kong's 2022 Omicron waves reached a population vaccinated with two very different
+platforms, Comirnaty (mRNA, **B**) and CoronaVac (inactivated, **S**), often with two,
+three or four doses before a first infection (**I**). Two questions follow: how much
+protection against reinfection does each history carry, and does an extra
+pre-infection dose *raise* reinfection risk, the pattern reported as **immune imprinting**?
 
-Hong Kong's 2022 Omicron waves landed on a population vaccinated with two very different
-platforms — Comirnaty (mRNA, **B**) and CoronaVac (inactivated, **S**) — often with two,
-three or four doses before a first infection (**I**). My HKU final-year project
-(STAT4799, 2023–24, supervised by Dr Eddy K. F. Lam) analysed territory-wide linked
-records with a calendar-day cloglog model. Those records are licensed and stay in their
-environment; this repository is a **clean-room re-implementation** of the method, rebuilt
-as a reusable, tested package — with one engineering change that removes the original
-bottleneck: the person-day panel had to be **sub-sampled** to fit at all. Here it never
-has to be built.
+The natural model is a discrete-time hazard on calendar days, so every history is compared
+under the same force of infection. Fitted naively it needs one row per person per day,
+about 5 × 10⁸ rows for a territory-wide cohort, which forces analysts to sub-sample. VVI
+fits the **same likelihood exactly** from people-at-risk and event counts per covariate
+cell and day: at most cells × days rows, whatever the cohort size. No sub-sampling, and
+therefore the power to see small effects.
 
-## How it works
+The package is a clean-room re-implementation of the method from my HKU final-year
+project (STAT4799, 2023–24, supervised by Dr Eddy K. F. Lam), rebuilt as a typed,
+tested library with a CLI, a simulator that serves as ground truth, publication-ready
+figures and a static interactive explorer.
 
-<img src="docs/figures/pipeline.svg" alt="How VVI works: exposure histories, calendar follow-up, a ledger of sufficient statistics, an exact cloglog GLM" width="100%">
+## Interactive explorer
 
-1. **Histories → profiles.** `encode_table` turns dated doses and positives into profile
-   strings (`BBBI` = three Comirnaty doses, then infection), merging positives within 28 days
-   into one episode and treating later infections as outcomes, not exposures.
-2. **Calendar follow-up.** Each person is at risk from entry to exit, except for the 28 days
-   after each infection; reinfections recur (Andersen–Gill).
-3. **A ledger, not a panel.** `aggregate` scatters ±1 at interval ends into a
-   *cells × days* difference array and takes a cumulative sum — `O(people + events)`, with no
-   person-day row ever materialised.
-4. **Exact GLM.** `fit` runs a binomial cloglog GLM on the ledger: hazard ratios, protection
-   effectiveness `PE = 1 − HR`, and any profile contrast with a Wald CI.
+A static, dependency-free page: choose a true imprinting effect and a cohort size and see
+the estimates land on the planted values; drag the effect size to see the power of the test
+at a 300k sub-sample and at the full cohort; compare the cost of the person-day and
+aggregated fits. It is built from synthetic data by `scripts/build_site.py` and deployed
+with GitHub Pages.
 
-<img src="docs/figures/fig1_histories.png" alt="Fig. 1: synthetic exposure histories as swimmer lanes; doses, first infections, follow-up and reinfections in calendar time" width="100%">
+<a href="https://ellensyuu.github.io/VVI/">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/explorer-dark.png">
+  <img alt="Screenshot of the interactive explorer: hazard ratios of seven histories with confidence intervals and planted values, and the imprinting contrast" src="docs/img/explorer-light.png" width="100%">
+</picture>
+</a>
 
-## Results on synthetic cohorts
-
-Every cohort below is simulated from the model with known parameters — two epidemic waves,
-staggered entry, censoring, recurrent infections — and an imprinting-like effect planted for
-one platform. Nothing here is real data.
-
-<img src="docs/figures/fig3_recovery.png" alt="Fig. 3: estimated hazard ratios with 95% CIs land on the planted truth; the BBBI vs BBI contrast detects the planted imprinting effect" width="100%">
-
-<table><tr>
-<td width="50%"><img src="docs/figures/fig2_calendar.png" alt="Fig. 2: observed daily incidence with the fitted B-spline baseline"></td>
-<td width="50%"><img src="docs/figures/fig4_waning.png" alt="Fig. 4: hazard ratio rising with time since the last exposure"></td>
-</tr><tr>
-<td><b>Calendar time</b> absorbs the epidemic waves, so every profile is compared under the same force of infection.</td>
-<td><b>Waning</b> enters as time-since-exposure bands; people move between cells during follow-up and the fit stays exact.</td>
-</tr></table>
-
-<img src="docs/figures/fig5_power.png" alt="Fig. 5: power of the imprinting test against cohort size for true HRs 1.10, 1.20, 1.30, with Monte-Carlo checks" width="100%">
-
-<img src="docs/figures/fig6_benchmark.png" alt="Fig. 6: build and fit time and peak memory against cohort size, person-day vs aggregated" width="100%">
-
-The [**interactive explorer**](https://ellensyuu.github.io/VVI/) lets you plant an
-imprinting effect of your choice, change the cohort size and watch the fit recover it —
-21 scenarios, each simulated and fitted by the package.
-
-## Quickstart
+## Quick start
 
 ```bash
-pip install "vvi[plot] @ git+https://github.com/EllenSyuu/VVI"
-vvi demo --n 300000
+git clone https://github.com/EllenSyuu/VVI && cd VVI
+python -m pip install -e ".[dev]"
+
+vvi demo          # simulate 300k people → aggregate → fit, with the planted truth alongside
+make check        # ruff · mypy · pytest (38 tests)
+make explorer     # build the explorer from synthetic data and serve it at localhost:8000
 ```
-
-```text
-synthetic cohort : 300,000 people, 17,757 infections
-risk set         : 94,222,268 person-days -> 17,520 rows (5,378x smaller)
-timings          : simulate 2.3s | aggregate 0.52s | fit 0.41s
-
-           term  log_hr    se    hr  ci_low  ci_high     pe      p true_hr
-            BBB  -0.465 0.024 0.628   0.599    0.659  0.372 <0.001   0.638
-           BBBI  -1.316 0.042 0.268   0.247    0.291  0.732 <0.001   0.259
-            BBI  -1.679 0.061 0.187   0.165    0.210  0.813 <0.001   0.202
-            ...
-imprinting contrast BBBI vs BBI: HR 1.44 (95% CI 1.25-1.65), p=2.2e-07
-```
-
-### Python API
 
 ```python
 import vvi
 
-# a synthetic cohort and its dated exposure histories
-cohort = vvi.simulate(300_000, seed=1)                 # people (+ anchor, entry, exit), events
-history = vvi.histories(cohort)                        # id, day, kind ("Comirnaty", "infection", …)
-assert (vvi.encode_table(history) == cohort.people.set_index("id").profile).all()
-
-# sufficient statistics -> exact fit
+cohort = vvi.simulate(300_000, seed=1)                       # or your own people / events tables
 ledger = vvi.aggregate(cohort.people, cohort.events, horizon=365, blank_days=28)
-fit = vvi.fit(ledger, reference="BB", df=7)
-fit.table()                                            # HR, 95% CI, PE = 1 − HR, p
-fit.contrast("BBBI", "BBI")                            # the imprinting test
-fit.baseline_hazard(range(365))                        # fitted epidemic curve
+fit = vvi.fit(ledger, reference="BB")
 
-# waning: a covariate that changes during follow-up, still exact
-bands = vvi.Bands(edges=(0, 90, 180, 270))
-ledger = vvi.aggregate(cohort.people, cohort.events, horizon=365, bands=bands)
-fit = vvi.fit(ledger, reference="BB", covariates=("sex", "age_band", "since"))
-fit.covariate_effects("since")                         # HR by days since last exposure
-
-# how many people does a contrast need?
-effect = fit.contrast("BBBI", "BBI")
-vvi.power(effect, n_fit=300_000, sizes=[1e5, 3e5, 1e6], log_hr=0.1)
-vvi.required_size(effect, n_fit=300_000, target=0.8, log_hr=0.1)
+fit.table()                       # hazard ratios, 95% CIs, protection effectiveness, p-values
+fit.contrast("BBBI", "BBI")       # the imprinting test
+vvi.required_size(fit.contrast("BBBI", "BBI"), n_fit=300_000, log_hr=0.1)
 ```
 
-Your own data needs a `people` table (`id, entry, exit`, the cell columns — `profile, sex,
-age_band` by default — and `anchor` for waning bands) and an `events` table (`id, day`).
-Analysis windows such as a variant era are one argument: `aggregate(..., window=(180, 365))`.
-`vvi.plots` draws every figure above in the same style (fonts are bundled).
+To analyse your own cohort, provide a `people` table (`id, entry, exit` and the cell
+columns `profile, sex, age_band`; `anchor` for waning) and an `events` table (`id, day`).
+`vvi.encode_table` turns dated doses and positives into profile strings. The
+[tutorial notebook](examples/quickstart.ipynb) walks through every step.
+
+## What it estimates
+
+| Quantity | Question it answers |
+|---|---|
+| **Hazard ratio by history** | How much lower is the reinfection hazard of `BBI`, `BBBI`, `SSSI`, … than of a reference history? |
+| **Imprinting contrast** | Among people infected after vaccination, does one extra pre-infection dose raise the hazard (`BBBI` vs `BBI`)? |
+| **Calendar baseline** | What did the epidemic curve look like? A cubic B-spline in calendar time absorbs the waves. |
+| **Waning** | How does protection fade with time since the last dose or infection? (a covariate that changes during follow-up) |
+| **Power and required size** | How many people does a contrast need to be detected, and what does sub-sampling cost? |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/histories-dark.png">
+  <img alt="Swimmer lanes for sixteen synthetic people: doses, first infections, follow-up and reinfections in calendar time" src="docs/img/histories-light.png" width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/calendar-dark.png">
+  <img alt="Observed daily infection rate in the reference cell and the fitted calendar baseline" src="docs/img/calendar-light.png" width="100%">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/waning-dark.png">
+  <img alt="Hazard ratio by time since the last exposure, rising across four bands, against the planted values" src="docs/img/waning-light.png" width="100%">
+</picture>
+
+Model, risk-set rules, derivations and limitations: [docs/method.md](docs/method.md).
+
+## Validated against a planted ground truth
+
+The simulator plants every effect the model estimates (hazard ratios by history, an
+imprinting-like contrast for one platform, sex and age effects, waning, two epidemic waves,
+staggered entry, censoring and recurrent infections with a 28-day episode window) and
+keeps the true values. The test suite checks that the aggregated fit equals the
+person-day fit to 10⁻⁷, that event and at-risk counts match cell by cell, and that every
+planted effect is recovered.
+
+| Hazard ratio | Planted | Estimated | 95% CI | Truth in CI |
+|---|---:|---:|---:|:---:|
+| BBB vs BB | 0.638 | 0.622 | 0.602–0.644 | ✓ |
+| BBI vs BB | 0.202 | 0.192 | 0.177–0.209 | ✓ |
+| BBBI vs BB | 0.259 | 0.252 | 0.237–0.268 | ✓ |
+| SS vs BB | 1.284 | 1.260 | 1.219–1.303 | ✓ |
+| SSS vs BB | 0.905 | 0.894 | 0.866–0.923 | ✓ |
+| SSI vs BB | 0.273 | 0.267 | 0.248–0.287 | ✓ |
+| SSSI vs BB | 0.247 | 0.257 | 0.240–0.274 | ✓ |
+| **BBBI vs BBI** | **1.284** | **1.310** | **1.189–1.443** | ✓ |
+| SSSI vs SSI | 0.905 | 0.960 | 0.877–1.052 | ✓ |
+
+<sub>One synthetic cohort, seed 2024: 600,000 people, 35,305 infections, 188 million person-days fitted from 17,520 rows.</sub>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/recovery-dark.gif">
+  <img alt="Estimated hazard ratios with 95% confidence intervals against the planted values, and the imprinting contrast" src="docs/img/recovery-light.gif" width="100%">
+</picture>
+
+Power is checked the same way: analytic curves from one fit agree with the share of 30
+simulated cohorts that detect the effect, and the test holds its size under the null
+([docs/power.md](docs/power.md)). A true imprinting HR of 1.10 has **27%** power in a 300k
+sub-sample and **85%** in a cohort of 1.5 million.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/power-dark.gif">
+  <img alt="Power of the imprinting test against cohort size for true hazard ratios 1.10, 1.20 and 1.30, with Monte Carlo checks" src="docs/img/power-light.gif" width="100%">
+</picture>
+
+## Engineering
+
+```mermaid
+flowchart LR
+    H[dated doses and positives<br/>or vvi.simulate] --> E[sequence.encode_table<br/>profiles · episode rule]
+    E --> R[riskset.at_risk_intervals<br/>entry · exit · 28-day windows]
+    R --> A[riskset.aggregate<br/>difference arrays · Bands]
+    A --> L[(ledger<br/>cells × days)]
+    L --> F[model.fit<br/>binomial cloglog GLM<br/>B-spline calendar baseline]
+    F --> O[hazard ratios · contrasts<br/>waning · power]
+    O --> P[figures<br/>light + dark]
+    O --> W[static explorer<br/>GitHub Pages]
+```
+
+| Principle | How it shows up |
+|---|---|
+| **Sufficient statistics, not samples** | `aggregate` scatters ±1 at interval ends into a cells × days difference array, `O(people + events)`, and never builds a person-day row. |
+| **Exactness as a contract** | Tests require the aggregated and person-day fits to agree to 10⁻⁷ and their counts to match cell by cell, with and without time-varying bands. |
+| **Time-varying covariates stay exact** | `Bands` cuts at-risk intervals where a person crosses a band edge, so people move between cells and the identity still holds. |
+| **Calendar time as the time scale** | Every history is compared on the same days under the same force of infection; no immortal time. |
+| **A simulator as ground truth** | Deterministic generator with known parameters; recovery, power and test size are checked against it. |
+| **Data never enter the repository** | Clean-room code; `.gitignore` and a CI data guard reject data files and restricted field names. See [docs/data-governance.md](docs/data-governance.md). |
+| **Reproducible outputs** | Every README image (PNG and animated GIF, light and dark) is re-rendered by `scripts/render_assets.py`; results in `docs/results` by `scripts/benchmark.py` and `scripts/power_study.py`. |
+| **Automation** | CI on Python 3.10–3.13 (data guard, Ruff, mypy, 38 tests including figure smoke tests, CLI demo); on-demand Pages deployment of the explorer. |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.png">
+  <img alt="Build and fit time and peak memory against cohort size for the person-day GLM and the aggregated fit" src="docs/img/benchmark-light.png" width="100%">
+</picture>
 
 ## Repository layout
 
 ```
-src/vvi/
-  sequence.py   histories → profile strings (BBBI, SSA, …), study filters, encode_table
-  riskset.py    at-risk intervals, Bands, sufficient-statistic aggregation, person-day expansion
-  model.py      cloglog GLM, hazard ratios, contrasts, covariate effects, fitted calendar curve
-  power.py      Wald power and required cohort size from one fit
-  simulate.py   synthetic cohort with known truth, waning, dated exposure histories
-  plots.py      the Atelier figure style (fonts: Cormorant Garamond, La Belle Aurore, SIL OFL)
-  cli.py        `vvi demo`
-tests/          35 tests · encoding, count identities, exact equivalence, recovery, power
+src/vvi/        sequence · riskset · model · power · simulate · plots · cli
+scripts/        render_assets · build_site · benchmark · power_study · make_notebook · check_no_data
+tests/          encoding, count identities, exact equivalence, recovery, waning, power, figures
 examples/       quickstart notebook (executed, synthetic)
-scripts/        figures, pipeline diagram, benchmark, power study, explorer data, data guard
-docs/           method, benchmark, power, data governance, figures, results (JSON)
-site/           the interactive explorer (GitHub Pages)
+docs/           method, benchmark, power, data governance, explorer page, results, images
 ```
 
-Reproduce everything: `python scripts/benchmark.py && python scripts/power_study.py &&
-python scripts/make_figures.py && python scripts/draw_pipeline.py && python scripts/build_site.py`.
+## Citation and licence
 
-## Data governance
-
-No record, extract, schema or result from the licensed study is in this repository —
-only code, a simulator with invented parameters, and synthetic outputs. `.gitignore` blocks
-data formats, and a CI job (`scripts/check_no_data.py`) fails on data-like files or restricted
-field names. See [`docs/data-governance.md`](docs/data-governance.md).
-
-## Citation
-
-```bibtex
-@software{zhou_vvi_2026,
-  author  = {Zhou, Ziyi},
-  title   = {VVI: hybrid immunity and immune imprinting in calendar time},
-  year    = {2026},
-  version = {0.2.0},
-  url     = {https://github.com/EllenSyuu/VVI}
-}
-```
-
-## License
-
-Code: [Apache-2.0](LICENSE) © Ziyi Zhou. Bundled fonts: SIL Open Font License
-([`src/vvi/fonts/licenses`](src/vvi/fonts/licenses)). The hero plate is drawn for
-[ellensyuu.github.io](https://ellensyuu.github.io).
+If you use this software, please cite it via [`CITATION.cff`](CITATION.cff) (GitHub's
+"Cite this repository" button). Released under the [Apache License 2.0](LICENSE);
+see [`NOTICE`](NOTICE).

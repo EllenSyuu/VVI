@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VVI · Hybrid Immunity in Calendar Time</title>
+<meta name="description" content="Plant an imprinting effect in a synthetic cohort and see an exact, sampling-free calendar-time hazard model recover it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f3f5f7; --panel: #ffffff; --rule: #d9dee5; --rule-2: #e9edf1;
+    --ink: #16202e; --ink-2: #4b5768; --ink-3: #7d8896;
+    --b: #2a78d6; --s: #eb6834; --a: #1baf7a;
+    --r1: #b9d3f0; --r2: #7eaee6; --r3: #3b7dd8; --r4: #1b4f9c; --r5: #0e3a73;
+    --tip-bg: #16202e; --tip-ink: #f3f5f7; --focus: #3b7dd8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #0e141c; --panel: #131b25; --rule: #243042; --rule-2: #1b2532;
+      --ink: #e8edf3; --ink-2: #a3afbd; --ink-3: #6f7c8c;
+      --b: #4a94ea; --s: #f07a45; --a: #1fb98f;
+      --r1: #244b7e; --r2: #3570b8; --r3: #5c9be6; --r4: #9cc4f3; --r5: #d3e5fa;
+      --tip-bg: #e8edf3; --tip-ink: #0e141c; --focus: #5c9be6;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #0e141c; --panel: #131b25; --rule: #243042; --rule-2: #1b2532;
+    --ink: #e8edf3; --ink-2: #a3afbd; --ink-3: #6f7c8c;
+    --b: #4a94ea; --s: #f07a45; --a: #1fb98f;
+    --r1: #244b7e; --r2: #3570b8; --r3: #5c9be6; --r4: #9cc4f3; --r5: #d3e5fa;
+    --tip-bg: #e8edf3; --tip-ink: #0e141c; --focus: #5c9be6;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 400 16px/1.55 "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  a { color: inherit; text-underline-offset: 3px; }
+  code { font-size: .9em; background: var(--rule-2); padding: 1px 5px; border-radius: 4px; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+
+  header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; }
+  .brand { font-weight: 800; letter-spacing: -0.01em; font-size: 17px; text-decoration: none; }
+  .top nav { display: flex; gap: 6px; align-items: center; }
+  .btn {
+    font: inherit; font-size: 14px; color: var(--ink-2); background: transparent;
+    border: 1px solid var(--rule); border-radius: 999px; padding: 6px 14px; cursor: pointer; text-decoration: none;
+  }
+  .btn:hover { color: var(--ink); border-color: var(--ink-3); }
+
+  .hero { padding: 40px 0 8px; }
+  .hero h1 {
+    font-size: clamp(34px, 5.6vw, 64px); line-height: 1.02; letter-spacing: -0.035em;
+    font-weight: 800; margin: 0 0 18px; max-width: 16ch;
+  }
+  .lede { font-size: 18px; color: var(--ink-2); max-width: 64ch; margin: 0 0 8px; }
+  .note { font-size: 13px; color: var(--ink-3); margin: 0; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; margin: 28px 0 16px; font-size: 14px; color: var(--ink-2); }
+  .controls .lab { font-weight: 600; color: var(--ink); margin-right: 4px; }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    font: inherit; font-size: 14px; border: 1px solid var(--rule); background: var(--panel);
+    color: var(--ink-2); border-radius: 999px; padding: 6px 12px; cursor: pointer;
+  }
+  .pill[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; background: var(--paper); }
+  .seg button { font: inherit; font-size: 13.5px; border: 0; background: transparent; color: var(--ink-2); padding: 5px 12px; border-radius: 999px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--rule); }
+
+  .stage {
+    display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 28px;
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 16px; padding: 24px;
+  }
+  .stage h2, .card h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .sub { font-size: 13.5px; color: var(--ink-2); margin: 0 0 12px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .ring { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--ink); display: inline-block; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--ink-3); font-size: 11px; font-family: inherit; }
+  .grid line { stroke: var(--rule-2); }
+  .crosshair { stroke: var(--ink-3); stroke-dasharray: 3 3; }
+
+  .big { font-size: 46px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+  .big small { font-size: 15px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; margin-left: 6px; }
+  .verdict { display: inline-block; margin: 12px 0 2px; font-size: 13.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 16px 0 6px; }
+  .stat b { display: block; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+  .stat span { font-size: 13px; color: var(--ink-2); }
+  .side { border-left: 1px solid var(--rule-2); padding-left: 24px; }
+
+  section { padding: 56px 0 0; }
+  section > .head { max-width: 70ch; margin-bottom: 16px; }
+  section > .head h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 6px; }
+  section > .head p { color: var(--ink-2); margin: 0; }
+  .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 16px; padding: 20px 24px; }
+  .two { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 28px; }
+  input[type=range] { accent-color: var(--r3); width: 240px; max-width: 100%; }
+  .scroll { overflow-x: auto; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--rule-2); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 600; color: var(--ink-2); font-size: 13px; }
+  .match { color: var(--a); font-weight: 600; }
+  .miss { color: var(--s); font-weight: 600; }
+
+  .tip {
+    position: fixed; pointer-events: none; z-index: 20; background: var(--tip-bg); color: var(--tip-ink);
+    border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; opacity: 0;
+    transition: opacity .08s; min-width: 120px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  }
+  .tip .row { display: flex; justify-content: space-between; gap: 14px; }
+
+  footer { padding: 64px 0 48px; font-size: 13px; color: var(--ink-3); }
+  @media (max-width: 860px) {
+    .stage, .two { grid-template-columns: 1fr; padding: 16px; }
+    .side { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule-2); padding-top: 16px; }
+    .card { padding: 16px; }
+    .wrap { padding: 0 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="https://github.com/EllenSyuu/VVI">VVI · Hybrid Immunity in Calendar Time</a>
+    <nav>
+      <a class="btn" href="https://github.com/EllenSyuu/VVI">Source on GitHub</a>
+      <button class="btn" id="theme" type="button" aria-label="Switch colour theme">Dark theme</button>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>Does a booster protect you — or imprint you?</h1>
+    <p class="lede">Choose a true imprinting effect and a cohort size. Each scenario is a cohort simulated,
+      collapsed to its sufficient statistics and fitted by <code>vvi</code>; the chart shows how close the
+      estimates land to what was planted.</p>
+    <p class="note">Synthetic data only: every number on this page was generated by <code>vvi.simulate</code>.</p>
+
+    <div class="controls">
+      <span><span class="lab">True HR, BBBI vs BBI</span> <span class="pills" id="hr-pills" role="group" aria-label="Planted hazard ratio"></span></span>
+      <span><span class="lab">Cohort</span> <span class="seg" id="n-seg" role="group" aria-label="Cohort size"></span></span>
+    </div>
+
+    <div class="stage">
+      <div>
+        <h2>Hazard ratio of each history vs two Comirnaty doses (BB)</h2>
+        <p class="sub">Estimate and 95% confidence interval; the ring is the planted value. Hover a row.</p>
+        <div class="legend"><span><i class="sw" style="background:var(--b)"></i>Comirnaty (B)</span><span><i class="sw" style="background:var(--s)"></i>CoronaVac (S)</span><span><i class="ring"></i>planted truth</span></div>
+        <div id="forest"></div>
+      </div>
+      <div class="side" aria-live="polite">
+        <h2>BBBI vs BBI: the imprinting contrast</h2>
+        <p class="sub">Reinfection after three doses then infection, against two doses then infection.</p>
+        <div class="big" id="c-hr">–</div>
+        <div class="note" id="c-ci" style="margin-top:6px"></div>
+        <div class="verdict" id="c-verdict"></div>
+        <div class="stats">
+          <div class="stat"><b id="s-ev">–</b><span>infections</span></div>
+          <div class="stat"><b id="s-pd">–</b><span>person-days</span></div>
+          <div class="stat"><b id="s-rows">–</b><span>GLM rows</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="head">
+      <h2>How big a cohort does it take?</h2>
+      <p>For a random sub-sample the standard error scales as 1/√n, so one fit gives the power of the test at
+        any size (<code>vvi.power</code>). Dots are the share of 30 simulated cohorts whose 95% CI lay above 1.</p>
+    </div>
+    <div class="card two">
+      <div>
+        <div class="controls" style="margin:0 0 10px"><label><span class="lab">True HR</span> <input id="hr" type="range" min="1.02" max="1.5" step="0.01" value="1.2" aria-label="True hazard ratio"> <b id="hr-val">1.20</b></label></div>
+        <div id="power"></div>
+      </div>
+      <div class="side" aria-live="polite">
+        <h3>Power at two cohort sizes</h3>
+        <div class="stats">
+          <div class="stat"><b id="p-sub">–</b><span>300k sub-sample</span></div>
+          <div class="stat"><b id="p-full">–</b><span>full cohort ≈ 1.5M</span></div>
+        </div>
+        <p class="sub" id="p-need" style="margin-top:8px"></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <h2>Same likelihood, a table that does not grow</h2>
+      <p>The fit needs only people at risk and events per covariate cell and day, so its input has at most
+        cells × days rows. Build + fit cost on synthetic cohorts, log scales.</p>
+    </div>
+    <div class="card">
+      <div class="seg" id="bench-seg" role="group" aria-label="Metric" style="margin-bottom:10px">
+        <button type="button" data-k="seconds" aria-pressed="true">Time</button>
+        <button type="button" data-k="mib" aria-pressed="false">Memory</button>
+      </div>
+      <div class="legend"><span><i class="sw" style="background:var(--ink-3)"></i>person-day GLM</span><span><i class="sw" style="background:var(--b)"></i>vvi, aggregated</span></div>
+      <div id="bench"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <h2>Checked against a known answer</h2>
+      <p>For the scenario selected above: what the simulator planted next to what the model recovered.</p>
+    </div>
+    <div class="card scroll" id="ledger"></div>
+  </section>
+
+  <footer>VVI · Apache-2.0 · <a href="https://github.com/EllenSyuu/VVI">github.com/EllenSyuu/VVI</a> · built from synthetic data by <code>scripts/build_site.py</code></footer>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+(async () => {
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (name, attrs = {}, parent) => {
+    const n = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+  const svg = (w, h) => el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img" });
+  const lin = (d0, d1, r0, r1) => (v) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
+  const log = (d0, d1, r0, r1) => (v) => r0 + ((Math.log(v) - Math.log(d0)) / (Math.log(d1) - Math.log(d0))) * (r1 - r0);
+  const people = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}k`);
+  const fmt = new Intl.NumberFormat("en-US");
+  const tip = document.getElementById("tip");
+  const showTip = (e, html) => { tip.innerHTML = html; tip.style.opacity = 1; tip.style.left = `${e.clientX + 14}px`; tip.style.top = `${e.clientY + 14}px`; };
+  const hideTip = () => { tip.style.opacity = 0; };
+
+  // theme toggle
+  const themeBtn = document.getElementById("theme");
+  const isDark = () => document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  const syncBtn = () => { themeBtn.textContent = isDark() ? "Light theme" : "Dark theme"; };
+  themeBtn.addEventListener("click", () => { document.documentElement.dataset.theme = isDark() ? "light" : "dark"; syncBtn(); drawAll(); });
+  syncBtn();
+
+  let data;
+  try { data = await (await fetch("data.json")).json(); }
+  catch (err) { document.querySelector(".stage").innerHTML = "<p>Could not load data.json.</p>"; return; }
+
+  // ---------------------------------------------------------------- scenario explorer
+  const HRS = [...new Set(data.scenarios.map((s) => s.hr))];
+  const NS_ = [...new Set(data.scenarios.map((s) => s.n))];
+  const st = { hr: 1.2, n: 300000 };
+  const buttons = (host, vals, key, label, cls) => {
+    host.innerHTML = "";
+    for (const v of vals) {
+      const b = document.createElement("button");
+      b.type = "button"; if (cls) b.className = cls; b.textContent = label(v);
+      b.setAttribute("aria-pressed", String(v === st[key]));
+      b.addEventListener("click", () => { st[key] = v; host.querySelectorAll("button").forEach((x, i) => x.setAttribute("aria-pressed", String(vals[i] === v))); drawScenario(); });
+      host.appendChild(b);
+    }
+  };
+  buttons(document.getElementById("hr-pills"), HRS, "hr", (v) => v.toFixed(1), "pill");
+  buttons(document.getElementById("n-seg"), NS_, "n", people);
+
+  const scenario = () => data.scenarios.find((s) => s.hr === st.hr && s.n === st.n);
+  const plat = (p) => (p.startsWith("B") ? css("--b") : css("--s"));
+
+  function drawForest(s) {
+    const W = 720, rowH = 36, gap = 16, top = 8, H = top + s.profiles.length * rowH + gap + 36, L = 64, R = 56;
+    const x = log(0.15, 2.0, L, W - R);
+    const host = document.getElementById("forest"); host.innerHTML = "";
+    const g = svg(W, H); host.appendChild(g);
+    const grid = el("g", { class: "grid" }, g);
+    for (const t of [0.2, 0.3, 0.5, 0.7, 1, 1.5, 2]) {
+      el("line", { x1: x(t), x2: x(t), y1: top, y2: H - 30 }, grid);
+      const tx = el("text", { x: x(t), y: H - 12, "text-anchor": "middle" }, g); tx.textContent = t;
+    }
+    el("line", { x1: x(1), x2: x(1), y1: top, y2: H - 30, stroke: css("--ink-3"), "stroke-dasharray": "4 4" }, g);
+    s.profiles.forEach((r, i) => {
+      const y = top + i * rowH + rowH / 2 + (r.profile.startsWith("S") ? gap : 0);
+      const c = plat(r.profile);
+      const row = el("g", {}, g);
+      el("rect", { x: 0, y: y - rowH / 2, width: W, height: rowH, fill: "transparent" }, row);
+      const lab = el("text", { x: L - 12, y: y + 4, "text-anchor": "end", style: `fill:${css("--ink")};font-size:13px;font-weight:600` }, row); lab.textContent = r.profile;
+      el("line", { x1: x(r.lo), x2: x(r.hi), y1: y, y2: y, stroke: c, "stroke-width": 3, "stroke-linecap": "round" }, row);
+      el("circle", { cx: x(r.hr), cy: y, r: 5.5, fill: c, stroke: css("--panel"), "stroke-width": 2 }, row);
+      el("circle", { cx: x(r.truth), cy: y, r: 8, fill: "none", stroke: css("--ink"), "stroke-width": 1.5 }, row);
+      const v = el("text", { x: W - R + 10, y: y + 4, style: `fill:${css("--ink")};font-size:13px;font-weight:600` }, row); v.textContent = r.hr.toFixed(2);
+      row.addEventListener("mousemove", (e) => showTip(e, `<b>${r.profile}</b><div class="row"><span>estimate</span><b>${r.hr.toFixed(3)}</b></div><div class="row"><span>95% CI</span><span>${r.lo.toFixed(2)}–${r.hi.toFixed(2)}</span></div><div class="row"><span>planted</span><span>${r.truth.toFixed(3)}</span></div>`));
+      row.addEventListener("mouseleave", hideTip);
+    });
+  }
+
+  function drawScenario() {
+    const s = scenario();
+    drawForest(s);
+    const c = s.contrasts[0];
+    document.getElementById("c-hr").innerHTML = `${c.hr.toFixed(2)}<small>planted ${c.truth.toFixed(2)}</small>`;
+    document.getElementById("c-ci").textContent = `95% CI ${c.lo.toFixed(2)}–${c.hi.toFixed(2)} · ${c.p < 0.001 ? "p < 0.001" : "p = " + c.p.toFixed(3)}`;
+    const v = document.getElementById("c-verdict");
+    const [text, col] = c.lo > 1 ? ["Imprinting detected", "--s"]
+      : c.hi < 1 ? ["Booster protects", "--a"]
+      : ["Not distinguishable from 1", "--ink-3"];
+    v.textContent = text; v.style.color = css(col); v.style.border = `1px solid ${css(col)}`;
+    document.getElementById("s-ev").textContent = fmt.format(s.events);
+    document.getElementById("s-pd").textContent = `${(s.person_days / 1e6).toFixed(1)}M`;
+    document.getElementById("s-rows").textContent = fmt.format(s.rows);
+    drawLedger(s);
+  }
+
+  function drawLedger(s) {
+    const rows = [...s.profiles.map((r) => ({ name: `${r.profile} vs BB`, ...r })),
+                  ...s.contrasts.map((r) => ({ name: r.pair, ...r }))];
+    const cell = (r) => (r.lo <= r.truth && r.truth <= r.hi) ? '<span class="match">✓ inside</span>' : '<span class="miss">outside</span>';
+    document.getElementById("ledger").innerHTML = `<table><thead><tr><th>Hazard ratio</th><th>Planted</th><th>Estimated</th><th>95% CI</th><th>Planted value in CI</th></tr></thead><tbody>${
+      rows.map((r) => `<tr><td>${r.name}</td><td>${r.truth.toFixed(3)}</td><td>${r.hr.toFixed(3)}</td><td>${r.lo.toFixed(2)}–${r.hi.toFixed(2)}</td><td>${cell(r)}</td></tr>`).join("")
+    }</tbody></table><p class="note" style="margin-top:10px">${people(s.n)} synthetic people, planted BBBI vs BBI = ${s.hr.toFixed(1)}. With 95% intervals, about one row in twenty is expected to miss.</p>`;
+  }
+
+  // ---------------------------------------------------------------- power
+  const erf = (x) => { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; };
+  const Phi = (z) => 0.5 * (1 + erf(z / Math.SQRT2));
+  const P = data.power, nFit = P.n_fit;
+  const seTab = Object.entries(P.curves).map(([k, v]) => [+k.slice(3), v.se_at_1M]).sort((a, b) => a[0] - b[0]);
+  const seAt = (hr) => {
+    if (hr <= seTab[0][0]) return seTab[0][1];
+    for (let i = 1; i < seTab.length; i++) if (hr <= seTab[i][0]) { const [a, sa] = seTab[i - 1], [b, sb] = seTab[i]; return sa + (sb - sa) * (hr - a) / (b - a); }
+    return seTab[seTab.length - 1][1];
+  };
+  const power = (hr, n) => { const th = Math.log(hr), se = seAt(hr) * Math.sqrt(nFit / n), z = 1.959964; return Phi(th / se - z) + Phi(-th / se - z); };
+  let hr2 = 1.2;
+
+  function drawPower() {
+    const W = 720, H = 320, L = 48, R = 16, T = 10, B = 40;
+    const x = log(3e4, 3e6, L, W - R), y = lin(0, 1, H - B, T);
+    const host = document.getElementById("power"); host.innerHTML = "";
+    const g = svg(W, H); host.appendChild(g);
+    const grid = el("g", { class: "grid" }, g);
+    for (const t of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      el("line", { x1: L, x2: W - R, y1: y(t), y2: y(t) }, grid);
+      const tx = el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, g); tx.textContent = `${t * 100}%`;
+    }
+    for (const t of [3e4, 1e5, 3e5, 1e6, 3e6]) { const tx = el("text", { x: x(t), y: H - 16, "text-anchor": "middle" }, g); tx.textContent = people(t); }
+    for (const [n, t] of [[3e5, "300k sub-sample"], [1.5e6, "full cohort ≈ 1.5M"]]) {
+      el("line", { x1: x(n), x2: x(n), y1: T, y2: H - B, stroke: css("--ink-3"), "stroke-dasharray": "4 4" }, g);
+      const tx = el("text", { x: x(n) + 6, y: H - B - 8 }, g); tx.textContent = t;
+    }
+    const ns = Array.from({ length: 121 }, (_, i) => 3e4 * Math.pow(100, i / 120));
+    const path = (hr) => ns.map((n, i) => `${i ? "L" : "M"}${x(n).toFixed(1)} ${y(power(hr, n)).toFixed(1)}`).join(" ");
+    el("path", { d: path(1.2), fill: "none", stroke: css("--r2"), "stroke-width": 2, "stroke-dasharray": "5 4" }, g);
+    el("path", { d: path(hr2), fill: "none", stroke: css("--r4"), "stroke-width": 3 }, g);
+    const mc = Object.values(P.monte_carlo)[0];
+    mc.sizes.forEach((n, i) => {
+      el("line", { x1: x(n), x2: x(n), y1: y(Math.max(0, mc.power[i] - mc.half_width[i])), y2: y(Math.min(1, mc.power[i] + mc.half_width[i])), stroke: css("--r3"), "stroke-width": 1.5 }, g);
+      el("circle", { cx: x(n), cy: y(mc.power[i]), r: 5, fill: css("--r3"), stroke: css("--panel"), "stroke-width": 2 }, g);
+    });
+    const cross = el("line", { class: "crosshair", y1: T, y2: H - B, opacity: 0 }, g);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, g);
+    hit.addEventListener("mousemove", (e) => {
+      const r = g.getBoundingClientRect(); const px = (e.clientX - r.left) * (W / r.width);
+      const n = Math.exp(Math.log(3e4) + (px - L) / (W - R - L) * (Math.log(3e6) - Math.log(3e4)));
+      cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("opacity", 1);
+      showTip(e, `<b>${people(n)} people</b><div class="row"><span>true HR ${hr2.toFixed(2)}</span><b>${(power(hr2, n) * 100).toFixed(0)}%</b></div><div class="row"><span>true HR 1.20</span><span>${(power(1.2, n) * 100).toFixed(0)}%</span></div>`);
+    });
+    hit.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); hideTip(); });
+    document.getElementById("hr-val").textContent = hr2.toFixed(2);
+    document.getElementById("p-sub").textContent = `${(power(hr2, 3e5) * 100).toFixed(0)}%`;
+    document.getElementById("p-full").textContent = `${(power(hr2, 1.5e6) * 100).toFixed(0)}%`;
+    const k = (1.959964 + 0.841621) * seAt(hr2) / Math.log(hr2);
+    document.getElementById("p-need").textContent = `80% power needs about ${people(nFit * k * k)} people. Dashed curve: true HR 1.20, where the dots were simulated.`;
+  }
+  document.getElementById("hr").addEventListener("input", (e) => { hr2 = +e.target.value; drawPower(); });
+
+  // ---------------------------------------------------------------- benchmark
+  let bk = "seconds";
+  document.querySelectorAll("#bench-seg button").forEach((b) => b.addEventListener("click", () => {
+    bk = b.dataset.k; document.querySelectorAll("#bench-seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); drawBench();
+  }));
+  function drawBench() {
+    const rows = data.benchmark.rows, W = 1080, H = 300, L = 58, R = 170, T = 10, B = 36;
+    const vals = rows.map((r) => r[bk]);
+    const lo = Math.pow(10, Math.floor(Math.log10(Math.min(...vals)))), hi = Math.pow(10, Math.ceil(Math.log10(Math.max(...vals))));
+    const x = log(700, 1.5e6, L, W - R), y = log(lo, hi, H - B, T);
+    const host = document.getElementById("bench"); host.innerHTML = "";
+    const g = svg(W, H); host.appendChild(g);
+    const grid = el("g", { class: "grid" }, g);
+    for (let v = lo; v <= hi; v *= 10) { el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v) }, grid); const t = el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, g); t.textContent = fmt.format(v); }
+    for (const t of [1e3, 1e4, 1e5, 1e6]) { const tx = el("text", { x: x(t), y: H - 12, "text-anchor": "middle" }, g); tx.textContent = people(t); }
+    for (const [name, col] of [["person-day", css("--ink-3")], ["aggregated", css("--b")]]) {
+      const r = rows.filter((d) => d.pipeline === name).sort((a, b) => a.people - b.people);
+      el("path", { d: r.map((d, i) => `${i ? "L" : "M"}${x(d.people)} ${y(d[bk])}`).join(" "), fill: "none", stroke: col, "stroke-width": 3 }, g);
+      r.forEach((d) => {
+        const c = el("circle", { cx: x(d.people), cy: y(d[bk]), r: 5, fill: col, stroke: css("--panel"), "stroke-width": 2 }, g);
+        c.addEventListener("mousemove", (e) => showTip(e, `<b>${name === "aggregated" ? "vvi, aggregated" : "person-day GLM"}</b><div class="row"><span>people</span><span>${fmt.format(d.people)}</span></div><div class="row"><span>GLM rows</span><span>${fmt.format(d.glm_rows)}</span></div><div class="row"><span>time</span><b>${d.seconds.toFixed(1)} s</b></div><div class="row"><span>memory</span><b>${fmt.format(Math.round(d.mib))} MiB</b></div>`));
+        c.addEventListener("mouseleave", hideTip);
+      });
+      const last = r[r.length - 1];
+      const t = el("text", { x: x(last.people) + 10, y: y(last[bk]) + 4, style: `fill:${css("--ink")};font-size:13px;font-weight:600` }, g);
+      t.textContent = `${bk === "seconds" ? last.seconds.toFixed(0) + " s" : fmt.format(Math.round(last.mib)) + " MiB"} for ${people(last.people)}`;
+    }
+  }
+
+  function drawAll() { drawScenario(); drawPower(); drawBench(); }
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawAll);
+  drawAll();
+})();
+</script>
+</body>
+</html>

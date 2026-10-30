@@ -22,12 +22,12 @@ cohort. Nothing in this notebook touches real data.""",
     ),
     (
         "code",
-        """import matplotlib
+        """import io
 import numpy as np
 import vvi
-from vvi import plots as P
+from vvi import plots
+from IPython.display import Image
 
-P.fonts();  # register the bundled fonts
 print("vvi", vvi.__version__)""",
     ),
     (
@@ -78,9 +78,9 @@ print(f"BBBI vs BBI: HR {c.hr:.2f} (95% CI {lo:.2f}-{hi:.2f}), "
     ),
     (
         "code",
-        """fig = P.plate((9.2, 6.0), kicker="Recovery", title="Estimates against the planted truth")
-ax = fig.add_axes([0.13, 0.12, 0.74, 0.62])
-P.forest(fit, ax, truth=truth);""",
+        """buf = io.BytesIO()
+plots.recovery(fit, truth, buf)
+Image(buf.getvalue(), width=760)""",
     ),
     ("md", """## 4 · Waning: a covariate that changes during follow-up"""),
     (
