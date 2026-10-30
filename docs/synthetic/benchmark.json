@@ -1,0 +1,77 @@
+{
+ "rows": [
+  {
+   "pipeline": "aggregated",
+   "people": 1000,
+   "glm_rows": 17142,
+   "person_days": 312576,
+   "seconds": 1.22,
+   "mib": 116.0
+  },
+  {
+   "pipeline": "person-day",
+   "people": 1000,
+   "glm_rows": 312576,
+   "person_days": 312576,
+   "seconds": 16.77,
+   "mib": 2095.0
+  },
+  {
+   "pipeline": "aggregated",
+   "people": 2500,
+   "glm_rows": 17297,
+   "person_days": 786628,
+   "seconds": 1.02,
+   "mib": 62.0
+  },
+  {
+   "pipeline": "person-day",
+   "people": 2500,
+   "glm_rows": 786628,
+   "person_days": 786628,
+   "seconds": 36.52,
+   "mib": 2787.0
+  },
+  {
+   "pipeline": "aggregated",
+   "people": 5000,
+   "glm_rows": 17445,
+   "person_days": 1569114,
+   "seconds": 1.03,
+   "mib": 59.0
+  },
+  {
+   "pipeline": "person-day",
+   "people": 5000,
+   "glm_rows": 1569114,
+   "person_days": 1569114,
+   "seconds": 71.86,
+   "mib": 5284.0
+  },
+  {
+   "pipeline": "aggregated",
+   "people": 30000,
+   "glm_rows": 17513,
+   "person_days": 9436954,
+   "seconds": 1.39,
+   "mib": 60.0
+  },
+  {
+   "pipeline": "aggregated",
+   "people": 300000,
+   "glm_rows": 17520,
+   "person_days": 94233919,
+   "seconds": 3.99,
+   "mib": 89.0
+  },
+  {
+   "pipeline": "aggregated",
+   "people": 1000000,
+   "glm_rows": 17520,
+   "person_days": 314087744,
+   "seconds": 13.17,
+   "mib": 318.0
+  }
+ ],
+ "machine": "2 vCPU, 7 GB RAM, single process"
+}

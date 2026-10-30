@@ -1,6 +1,6 @@
 """Power of the imprinting contrast (BBBI vs BBI) against cohort size.
 
-    python scripts/power_study.py      # writes docs/results/power.json and docs/power.md
+    python scripts/power_study.py      # writes docs/synthetic/power.json and docs/power.md
 
 Analytic curves come from one large fit per effect size (``vvi.power``, SE ∝ 1/√n);
 Monte-Carlo replicates at three sizes check them, and a null scenario checks the
@@ -19,7 +19,7 @@ import vvi
 from vvi import Truth, aggregate, fit, simulate
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "docs" / "results"
+OUT = ROOT / "docs" / "synthetic"
 HRS = (1.10, 1.20, 1.30)
 SIZES = np.geomspace(30_000, 3_000_000, 60)
 N_FIT = 1_000_000

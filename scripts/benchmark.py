@@ -1,6 +1,6 @@
 """Benchmark: naive person-day GLM vs the aggregated sufficient-statistics GLM.
 
-    python scripts/benchmark.py   # writes docs/results/benchmark.json and docs/benchmark.md
+    python scripts/benchmark.py   # writes docs/synthetic/benchmark.json and docs/benchmark.md
     python scripts/render_assets.py  # then redraws docs/img/benchmark-*.png
 
 Both pipelines produce identical estimates (see tests); this measures cost only.
@@ -67,8 +67,8 @@ def main() -> None:
         + "\n"
     )
 
-    (ROOT / "docs" / "results").mkdir(parents=True, exist_ok=True)
-    (ROOT / "docs" / "results" / "benchmark.json").write_text(
+    (ROOT / "docs" / "synthetic").mkdir(parents=True, exist_ok=True)
+    (ROOT / "docs" / "synthetic" / "benchmark.json").write_text(
         json.dumps(
             {
                 "rows": [

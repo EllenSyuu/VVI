@@ -43,3 +43,5 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest --cov --cov-report=term-missing --cov-fail-under=90
       - run: vvi demo --n 200000
+      - name: Explorer builds from a clean checkout
+        run: python scripts/build_site.py build/site

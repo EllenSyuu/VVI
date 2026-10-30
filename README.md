@@ -177,7 +177,7 @@ flowchart LR
 | **Calendar time as the time scale** | Every history is compared on the same days under the same force of infection; no immortal time. |
 | **A simulator as ground truth** | Deterministic generator with known parameters; recovery, power and test size are checked against it. |
 | **Data never enter the repository** | Clean-room code; `.gitignore` and a CI data guard reject data files and restricted field names. See [docs/data-governance.md](docs/data-governance.md). |
-| **Reproducible outputs** | Every README image (PNG and animated GIF, light and dark) is re-rendered by `scripts/render_assets.py`; results in `docs/results` by `scripts/benchmark.py` and `scripts/power_study.py`. |
+| **Reproducible outputs** | Every README image (PNG and animated GIF, light and dark) is re-rendered by `scripts/render_assets.py`; synthetic benchmark and power records in `docs/synthetic` by `scripts/benchmark.py` and `scripts/power_study.py`. |
 | **Automation** | CI on Python 3.10–3.13 (data guard, Ruff, mypy, 38 tests including figure smoke tests, CLI demo); on-demand Pages deployment of the explorer. |
 
 <picture>
@@ -192,7 +192,7 @@ src/vvi/        sequence · riskset · model · power · simulate · plots · cl
 scripts/        render_assets · build_site · benchmark · power_study · make_notebook · check_no_data
 tests/          encoding, count identities, exact equivalence, recovery, waning, power, figures
 examples/       quickstart notebook (executed, synthetic)
-docs/           method, benchmark, power, data governance, explorer page, results, images
+docs/           method, benchmark, power, data governance, explorer page, synthetic benchmark/power records, images
 ```
 
 ## Citation and licence

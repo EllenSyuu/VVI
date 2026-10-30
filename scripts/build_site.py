@@ -5,7 +5,7 @@
 For each planted imprinting strength (true HR of BBBI vs BBI) and cohort size, a cohort
 is simulated, aggregated and fitted with vvi. The page template is copied from
 docs/explorer/index.html and the results written next to it as data.json, together
-with the power and benchmark records in docs/results. No real data is read.
+with the synthetic power and benchmark records in docs/synthetic. No real data is read.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def main(out_dir: Path) -> None:
         for j, n in enumerate(SIZES):
             scenarios.append(scenario(hr, n, seed=7000 + 10 * i + j))
             print(f"HR {hr} · {n:,} people")
-    res = ROOT / "docs" / "results"
+    res = ROOT / "docs" / "synthetic"
     data = {
         "version": vvi.__version__,
         "scenarios": scenarios,

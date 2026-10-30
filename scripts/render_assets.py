@@ -4,7 +4,7 @@
 
 Nothing here reads real data: cohorts are simulated with known parameters, fitted with
 vvi, and only the resulting figures are written. The power and benchmark figures read
-docs/results/{power,benchmark}.json, written by scripts/power_study.py and
+docs/synthetic/{power,benchmark}.json, written by scripts/power_study.py and
 scripts/benchmark.py.
 """
 
@@ -21,7 +21,7 @@ from vvi import plots
 
 ROOT = Path(__file__).resolve().parents[1]
 IMG = ROOT / "docs" / "img"
-RES = ROOT / "docs" / "results"
+RES = ROOT / "docs" / "synthetic"
 MARKERS = {"300k sub-sample": 300_000, "full cohort ≈ 1.5M": 1_500_000}
 
 

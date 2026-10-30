@@ -18,7 +18,7 @@ check: lint typecheck test   ## everything CI runs
 demo:           ## synthetic end-to-end run
 	vvi demo
 
-results:        ## benchmark + power study -> docs/results (slow, synthetic)
+results:        ## benchmark + power study -> docs/synthetic (slow, synthetic)
 	python scripts/benchmark.py
 	python scripts/power_study.py
 
