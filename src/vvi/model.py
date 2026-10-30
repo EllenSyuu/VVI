@@ -21,7 +21,7 @@ pre-infection dose is associated with *more* reinfection.
 from __future__ import annotations
 
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -66,11 +66,21 @@ class Effect:
 class HybridImmunityFit:
     """Fitted model; see :func:`fit`."""
 
-    def __init__(self, result, design_info, reference: str, profiles: Sequence[str]):
+    def __init__(
+        self,
+        result,
+        design_info,
+        reference: str,
+        profiles: Sequence[str],
+        covariate_refs: Mapping[str, str] | None = None,
+        covariate_levels: Mapping[str, Sequence[str]] | None = None,
+    ):
         self.result = result
         self.design_info = design_info
         self.reference = reference
         self.profiles = list(profiles)
+        self.covariate_refs = dict(covariate_refs or {})
+        self.covariate_levels = {k: list(v) for k, v in (covariate_levels or {}).items()}
         self._names = list(design_info.column_names)
 
     # --- coefficients -------------------------------------------------------
@@ -103,6 +113,24 @@ class HybridImmunityFit:
             w[self._profile_term(baseline)] = w.get(self._profile_term(baseline), 0) - 1.0
         return self._effect(f"{profile} vs {baseline}", self._vector(w))
 
+    def covariate_effects(self, name: str) -> list[Effect]:
+        """Hazard ratio of every level of covariate ``name`` vs its reference level.
+
+        The reference level is included (HR 1, no CI), in the covariate's level order —
+        e.g. the waning curve over time-since-exposure bands.
+        """
+        if name not in self.covariate_refs:
+            raise KeyError(f"{name!r} is not a covariate of this fit")
+        ref = self.covariate_refs[name]
+        out = []
+        for level in self.covariate_levels[name]:
+            if level == ref:
+                out.append(Effect(level, 0.0, np.nan))
+            else:
+                term = f"C({name}, Treatment({ref!r}))[T.{level}]"
+                out.append(self._effect(level, self._vector({term: 1.0})))
+        return out
+
     def table(self) -> pd.DataFrame:
         """One row per non-reference profile and covariate level."""
         rows = []
@@ -133,7 +161,7 @@ class HybridImmunityFit:
         """
         days = np.asarray(days)
         frame = pd.DataFrame({"day": days, "profile": levels.get("profile", self.reference)})
-        for _factor, (col, ref) in _REFS.items():
+        for col, ref in self.covariate_refs.items():
             frame[col] = levels.get(col, ref)
         X = patsy.build_design_matrices([self.design_info], frame)[0]
         return -np.expm1(-np.exp(np.asarray(X) @ self.result.params))
@@ -143,7 +171,8 @@ class HybridImmunityFit:
         return int(self.result.model.endog[:, 0].sum()) if self.result.model.endog.ndim == 2 else -1
 
 
-_REFS = {"sex": ("sex", "F"), "age": ("age_band", "18-59")}
+#: Reference levels used when a covariate is named without one.
+DEFAULT_REFERENCES: dict[str, str] = {"sex": "F", "age_band": "18-59"}
 
 
 def _pretty(name: str) -> str:
@@ -166,12 +195,16 @@ def spline_knots(first_day: int, last_day: int, df: int) -> tuple[float, ...]:
     return tuple(np.linspace(first_day, last_day, df - 3 + 2)[1:-1].round(6))
 
 
-def _formula(reference: str, df: int, covariates: Sequence[str], bounds: tuple[int, int]) -> str:
+def _levels(column: pd.Series) -> list[str]:
+    if isinstance(column.dtype, pd.CategoricalDtype):
+        present = set(column.astype(str).unique())
+        return [str(c) for c in column.cat.categories if str(c) in present]
+    return sorted(column.astype(str).unique())
+
+
+def _formula(reference: str, df: int, refs: Mapping[str, str], bounds: tuple[int, int]) -> str:
     terms = [f"C(profile, Treatment({reference!r}))"]
-    if "sex" in covariates:
-        terms.append("C(sex, Treatment('F'))")
-    if "age_band" in covariates:
-        terms.append("C(age_band, Treatment('18-59'))")
+    terms += [f"C({name}, Treatment({ref!r}))" for name, ref in refs.items()]
     lo, hi = bounds
     knots = spline_knots(lo, hi, df)
     terms.append(f"bs(day, knots={knots!r}, degree=3, lower_bound={lo}, upper_bound={hi})")
@@ -184,7 +217,7 @@ def fit(
     reference: str,
     profiles: Sequence[str] | None = None,
     df: int = 7,
-    covariates: Sequence[str] = ("sex", "age_band"),
+    covariates: Sequence[str] | Mapping[str, str] = ("sex", "age_band"),
 ) -> HybridImmunityFit:
     """Fit the cloglog calendar-time model.
 
@@ -192,6 +225,11 @@ def fit(
     (columns ``at_risk`` and ``events``) or a person-day table with a 0/1 ``event``
     column. Both give the same estimates; the aggregated one is orders of
     magnitude smaller.
+
+    ``covariates`` are categorical adjustment variables. Pass a mapping
+    ``{name: reference_level}`` to choose reference levels; otherwise ``sex`` and
+    ``age_band`` use :data:`DEFAULT_REFERENCES` and any other covariate (e.g. the
+    ``since`` band from :class:`vvi.riskset.Bands`) uses its first level.
     """
     if profiles is not None:
         data = data[data["profile"].isin(profiles)]
@@ -199,8 +237,18 @@ def fit(
     if reference not in profiles:
         raise ValueError(f"reference profile {reference!r} not in data")
 
+    levels = {name: _levels(data[name]) for name in covariates}
+    if isinstance(covariates, Mapping):
+        refs = {str(k): str(v) for k, v in covariates.items()}
+    else:
+        refs = {n: DEFAULT_REFERENCES.get(n, levels[n][0]) for n in covariates}
+    for name, ref in refs.items():
+        if ref not in levels[name]:
+            raise ValueError(f"reference level {ref!r} of {name!r} not in data")
+    data = data.assign(**{n: data[n].astype(str) for n in refs})
+
     bounds = (int(data["day"].min()), int(data["day"].max()))
-    rhs = _formula(reference, df, covariates, bounds)
+    rhs = _formula(reference, df, refs, bounds)
     count_col = "events" if "events" in data.columns else "event"
     empty = [p for p, d in data.groupby("profile")[count_col].sum().items() if d == 0]
     if empty:
@@ -220,4 +268,4 @@ def fit(
 
     family = sm.families.Binomial(link=sm.families.links.CLogLog())
     result = sm.GLM(y, X, family=family).fit(maxiter=200, tol=1e-10)  # IRLS
-    return HybridImmunityFit(result, X.design_info, reference, profiles)
+    return HybridImmunityFit(result, X.design_info, reference, profiles, refs, levels)

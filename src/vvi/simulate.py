@@ -7,11 +7,18 @@ demonstrate the method without touching any restricted record.
 Data-generating process (daily discrete time, Andersen–Gill style recurrent events)::
 
     cloglog P(event on day t | at risk) = eta(t) + alpha' x_i + beta[profile_i]
+                                          + gamma[band(t - anchor_i)]
 
 * ``eta(t)`` is a two-wave epidemic curve (a winter wave and a summer–autumn wave);
 * ``x_i`` holds sex and age band; ``profile_i`` is fixed at enrolment;
+* ``anchor_i`` is the day of the last exposure (dose or infection) before entry, and
+  ``gamma`` an optional waning effect by time since that exposure (zero by default);
 * after each event the person is not at risk for ``blank_days`` days (same episode);
 * people enter on a staggered date and may be censored (death, emigration, ...).
+
+:func:`histories` back-fills dated doses and infections consistent with each
+person's profile and anchor, so the full pipeline — :func:`vvi.sequence.encode` on
+raw dated events, then aggregation, then the fit — can be exercised end to end.
 """
 
 from __future__ import annotations
@@ -70,13 +77,21 @@ class Truth:
         default_factory=lambda: {"18-59": 0.62, "60-79": 0.30, "80+": 0.08}
     )
     reference: str = "BB"
+    #: Log hazard ratio by time since the last exposure; keys are band labels of
+    #: ``waning_edges`` (see :class:`vvi.riskset.Bands`). ``None`` = no waning.
+    waning: dict[str, float] | None = None
+    waning_edges: tuple[int, ...] = (0, 90, 180, 270)
+
+
+WANING_EXAMPLE: dict[str, float] = {"0-89d": 0.0, "90-179d": 0.25, "180-269d": 0.45, "270d+": 0.60}
+"""A waning pattern for demonstrations: protection fades as time since exposure grows."""
 
 
 @dataclass
 class Cohort:
     """A simulated cohort: one row per person plus a table of event days."""
 
-    people: pd.DataFrame  # id, sex, age_band, profile, entry, exit
+    people: pd.DataFrame  # id, sex, age_band, profile, anchor, entry, exit
     events: pd.DataFrame  # id, day
     horizon: int
     blank_days: int
@@ -119,6 +134,15 @@ def simulate(
     entry = rng.integers(0, max_entry_day + 1, size=n)
     daily_censor = -np.log1p(-annual_censoring) / 365.0
     exit_ = np.minimum(entry + rng.geometric(1 - np.exp(-daily_censor), size=n), horizon)
+    # Last exposure 14-240 days before entry (14 days: a dose or infection needs time).
+    anchor = entry - rng.integers(14, 241, size=n)
+
+    edges = np.asarray(truth.waning_edges)
+    if truth.waning:
+        labels = band_labels(truth.waning_edges)
+        gamma = np.array([truth.waning.get(lab, 0.0) for lab in labels])
+    else:
+        gamma = np.zeros(len(edges))
 
     eta = epidemic_curve(np.arange(horizon))
     blocked_until = np.full(n, -1)  # last day of the current not-at-risk window
@@ -129,7 +153,10 @@ def simulate(
         idx = np.flatnonzero(at_risk)
         if idx.size == 0:
             continue
-        p = -np.expm1(-np.exp(eta[t] + lin[idx]))
+        lp = eta[t] + lin[idx]
+        if truth.waning:
+            lp = lp + gamma[np.searchsorted(edges, t - anchor[idx], side="right") - 1]
+        p = -np.expm1(-np.exp(lp))
         hit = idx[rng.random(idx.size) < p]
         if hit.size:
             ev_id.append(hit)
@@ -142,6 +169,7 @@ def simulate(
             "sex": pd.Categorical(sex, categories=SEXES),
             "age_band": pd.Categorical(age_band, categories=AGE_BANDS),
             "profile": profile,
+            "anchor": anchor,
             "entry": entry,
             "exit": exit_,
         }
@@ -153,3 +181,58 @@ def simulate(
         }
     )
     return Cohort(people, events, horizon, blank_days, truth)
+
+
+def band_labels(edges: tuple[int, ...] | list[int]) -> list[str]:
+    """``(0, 90, 180)`` -> ``["0-89d", "90-179d", "180d+"]``."""
+    e = list(edges)
+    return [f"{a}-{b - 1}d" for a, b in zip(e[:-1], e[1:], strict=True)] + [f"{e[-1]}d+"]
+
+
+_PRODUCTS = {"B": "Comirnaty", "S": "CoronaVac", "O": "Comirnaty bivalent"}
+
+
+def histories(cohort: Cohort, *, seed: int | None = 0) -> pd.DataFrame:
+    """Dated exposure events consistent with each person's profile and anchor.
+
+    Returns ``id, day, kind`` where ``kind`` is a product name or ``"infection"``
+    and ``day`` is relative to the start of follow-up (negative = before it). The
+    last exposure falls on the person's ``anchor``; earlier doses are spaced like a
+    primary series (21-35 days) and a booster (120-270 days). Encoding these events
+    with :func:`vvi.sequence.encode` recovers each person's profile.
+    """
+    rng = np.random.default_rng(seed)
+    ppl = cohort.people
+    rows_id: list[np.ndarray] = []
+    rows_day: list[np.ndarray] = []
+    rows_kind: list[np.ndarray] = []
+    for profile, grp in ppl.groupby("profile", sort=False):
+        ids = grp["id"].to_numpy()
+        day = grp["anchor"].to_numpy().copy()
+        k = len(ids)
+        symbols = list(profile)
+        # walk backwards from the anchor
+        for pos in range(len(symbols) - 1, -1, -1):
+            sym = symbols[pos]
+            kind = "infection" if sym in "IPA" else _PRODUCTS[sym]
+            rows_id.append(ids)
+            rows_day.append(day.copy())
+            rows_kind.append(np.full(k, kind, dtype=object))
+            if pos == 0:
+                break
+            prev_is_dose = symbols[pos - 1] not in "IPA"
+            if sym in "IPA":  # infection some months after the last dose
+                gap = rng.integers(60, 300, size=k)
+            elif pos == 1 and prev_is_dose:  # second dose of the primary series
+                gap = rng.integers(21, 36, size=k)
+            else:  # booster
+                gap = rng.integers(120, 271, size=k)
+            day = day - gap
+    out = pd.DataFrame(
+        {
+            "id": np.concatenate(rows_id),
+            "day": np.concatenate(rows_day),
+            "kind": np.concatenate(rows_kind),
+        }
+    )
+    return out.sort_values(["id", "day"], ignore_index=True)

@@ -86,7 +86,36 @@ person-day route exhausting memory long before the aggregated one notices.
 Continuous age or time-since-dose can be handled by discretising them into the
 cell key (the number of rows grows with the number of levels, not with people).
 
-## 6. Validation
+## 6. Covariates that change during follow-up: waning
+
+Protection fades with time since the last dose or infection. Let `a_i` be the day of
+person *i*'s last exposure before entry and cut `t − a_i` into bands
+(`vvi.Bands`, default 0–89, 90–179, 180–269, 270+ days):
+
+$$\log\{-\log(1-p_{it})\} = \eta(t) + \alpha^\top x_i + \beta_{\text{profile}(i)} + \gamma_{\text{band}(t-a_i)}.$$
+
+The sufficient-statistic identity still holds because the band is piecewise constant:
+`Bands.split` cuts every at-risk interval where it crosses a band edge, and the band joins
+the cell key. A person therefore *moves between cells* over calendar time, and the ledger
+grows by the number of bands (≈ 52k rows for four bands) — still independent of cohort
+size. Tests check the banded ledger against the banded person-day panel cell by cell and
+fit by fit.
+
+## 7. Power: how many people does a contrast need?
+
+For a random sub-sample of a fixed design, `se(β̂)` scales as `1/√n`. One fit on
+`n_fit` people therefore gives the Wald power of a contrast with true log-HR `θ` at any
+size:
+
+$$\text{power}(n) = \Phi\!\left(\frac{|\theta|}{\mathrm{se}\sqrt{n_\text{fit}/n}} - z_{1-\alpha/2}\right) + \Phi\!\left(-\frac{|\theta|}{\mathrm{se}\sqrt{n_\text{fit}/n}} - z_{1-\alpha/2}\right)$$
+
+(`vvi.power`, `vvi.required_size`). In the synthetic design, detecting an imprinting HR of
+1.20 with 80% power takes ≈ 333k people and an HR of 1.10 takes ≈ 1.3M — so a 300k
+sub-sample would usually miss the smaller effect that the full cohort detects. Monte-Carlo
+replicates agree with the analytic curve, and the null rejection rate is close to nominal
+([`docs/power.md`](power.md)).
+
+## 8. Validation
 
 `vvi.simulate` generates a cohort from the model above with known `β`, `α`,
 `η(t)`, staggered entry, censoring and recurrent events, and plants an
@@ -98,11 +127,12 @@ imprinting-like pattern (`β_BBBI > β_BBI`). Tests assert:
 * every profile effect is recovered within 4 standard errors;
 * the planted imprinting contrast is covered by its 95% CI and detected.
 
-## 7. Limitations and extensions
+## 9. Limitations and extensions
 
-* **Constant effects.** `β` does not wane. A natural extension adds
-  time-since-last-exposure bands to the cell key, giving piecewise-constant
-  waning curves at the same cost.
+* **Waning is shared.** The `γ` bands are common to all profiles; profile-specific
+  waning is an interaction (profile × band) away and keeps the ledger exact.
+* **Anchor after entry.** The band anchor is the last exposure *before* entry; a
+  reinfection during follow-up does not reset it.
 * **Selection.** Who gets boosted, and who gets *tested*, is not random. Monge
   et al. (2023) show that apparent imprinting can arise from such selection;
   negative-control outcomes or test-negative designs are the usual checks.

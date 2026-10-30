@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "VVI: hybrid immunity and immune imprinting on calendar-time risk sets"
+title: "VVI: hybrid immunity and immune imprinting in calendar time"
 abstract: >-
   Exact, sampling-free discrete-time (cloglog) hazard models for comparing
   vaccination–infection histories, with a synthetic-cohort simulator for validation.
@@ -8,8 +8,8 @@ type: software
 authors:
   - family-names: Zhou
     given-names: Ziyi
-version: 0.1.0
-date-released: 2026-10-28
+version: 0.2.0
+date-released: 2026-10-30
 license: Apache-2.0
 repository-code: "https://github.com/EllenSyuu/VVI"
 keywords:

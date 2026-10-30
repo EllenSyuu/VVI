@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 #: Default mapping from product names (as they appear in registries) to symbols.
 PRODUCT_CODES: Mapping[str, str] = {
@@ -126,6 +126,44 @@ def encode(
         else:
             out.append(product_symbol(e.kind, codes))
     return collapse("".join(out))
+
+
+def encode_table(
+    events,
+    *,
+    id_col: str = "id",
+    day_col: str = "day",
+    kind_col: str = "kind",
+    origin: date = date(2022, 1, 1),
+    as_of: date | int | None = None,
+    episode_gap: int = 28,
+    variant_switch: date | None = None,
+    codes: Mapping[str, str] = PRODUCT_CODES,
+):
+    """Encode a long table of dated events (one row per dose or positive) per person.
+
+    ``day_col`` may hold dates or integer day offsets from ``origin``. Returns a
+    ``pandas.Series`` of profile strings indexed by person id.
+    """
+    import pandas as pd
+
+    df = events[[id_col, day_col, kind_col]]
+    days = df[day_col]
+    if pd.api.types.is_integer_dtype(days):
+        days = [origin + timedelta(days=int(d)) for d in days]
+    if isinstance(as_of, int):
+        as_of = origin + timedelta(days=as_of)
+    rows = zip(df[id_col].to_numpy(), days, df[kind_col].to_numpy(), strict=True)
+    by_id: dict = {}
+    for pid, d, kind in rows:
+        by_id.setdefault(pid, []).append(Event(d, str(kind)))
+    out = {
+        pid: encode(
+            evs, as_of=as_of, episode_gap=episode_gap, variant_switch=variant_switch, codes=codes
+        )
+        for pid, evs in by_id.items()
+    }
+    return pd.Series(out, name="profile").rename_axis(id_col)
 
 
 def collapse(code: str) -> str:

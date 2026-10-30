@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import time
 
+import numpy as np
+
 from vvi import aggregate, fit, simulate
 
 
@@ -32,10 +34,10 @@ def demo(n: int, seed: int, df: int) -> None:
 
     table = model.table()
     truth = cohort.truth.profile_effects
-    table["true_hr"] = [
-        f"{2.718281828 ** truth[t]:.3f}" if t in truth else "" for t in table["term"]
-    ]
-    print(table.round(3).to_string(index=False))
+    table["true_hr"] = [f"{np.exp(truth[t]):.3f}" if t in truth else "" for t in table["term"]]
+    table = table.round(3)
+    table["p"] = ["<0.001" if v < 0.001 else f"{v:.3f}" for v in model.table()["p"]]
+    print(table.to_string(index=False))
     for platform in ("B", "S"):
         c = model.contrast(platform * 3 + "I", platform * 2 + "I")
         lo, hi = c.ci

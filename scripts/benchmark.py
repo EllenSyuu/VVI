@@ -1,26 +1,20 @@
 """Benchmark: naive person-day GLM vs the aggregated sufficient-statistics GLM.
 
-    python scripts/benchmark.py   # writes docs/figures/benchmark.png and docs/benchmark.md
+    python scripts/benchmark.py   # writes docs/results/benchmark.json and docs/benchmark.md
+    python scripts/make_figures.py   # then redraws docs/figures/benchmark.png
 
 Both pipelines produce identical estimates (see tests); this measures cost only.
 """
 
 from __future__ import annotations
 
+import json
 import time
 import tracemalloc
 import warnings
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from matplotlib.ticker import FuncFormatter  # noqa: E402
-
-from vvi import aggregate, fit, person_days, simulate  # noqa: E402
-from vvi.plots import INK, INK_2, PLATFORM_COLORS, SURFACE, style  # noqa: E402
+from vvi import aggregate, fit, person_days, simulate
 
 ROOT = Path(__file__).resolve().parents[1]
 NAIVE_SIZES = [1_000, 2_500, 5_000]
@@ -73,44 +67,26 @@ def main() -> None:
         + "\n"
     )
 
-    fig, axes = plt.subplots(1, 2, figsize=(8.6, 3.5), facecolor=SURFACE)
-    for ax, col, label in ((axes[0], 4, "Build + fit time (s)"), (axes[1], 5, "Peak memory (MiB)")):
-        style(ax)
-        ax.grid(axis="y", color="#e6e5e1", lw=0.8)
-        for name, color in (
-            ("person-day", PLATFORM_COLORS["S"]),
-            ("aggregated", PLATFORM_COLORS["B"]),
-        ):
-            pts = [(r[1], r[col]) for r in rows if r[0] == name]
-            x, y = np.array(pts).T
-            ax.plot(x, y, "-o", color=color, lw=2, ms=6, mec=SURFACE, mew=1.5)
-            ax.annotate(
-                name,
-                (x[-1], y[-1]),
-                xytext=(6, 0),
-                textcoords="offset points",
-                va="center",
-                fontsize=9,
-                color=INK_2,
-            )
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
-        ax.yaxis.set_major_formatter(
-            FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 1 else f"{v:g}")
+    (ROOT / "docs" / "results").mkdir(parents=True, exist_ok=True)
+    (ROOT / "docs" / "results" / "benchmark.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    dict(
+                        pipeline=r[0],
+                        people=r[1],
+                        glm_rows=r[2],
+                        person_days=r[3],
+                        seconds=round(r[4], 2),
+                        mib=round(r[5], 1),
+                    )
+                    for r in rows
+                ],
+                "machine": "2 vCPU, 7 GB RAM, single process",
+            },
+            indent=1,
         )
-        ax.set_xlabel("Cohort size (people)", color=INK_2, fontsize=9)
-        ax.set_title(label, loc="left", color=INK, fontsize=10.5, fontweight="bold")
-    fig.suptitle(
-        "Same likelihood, a table that does not grow with the cohort",
-        x=0.01,
-        ha="left",
-        color=INK,
-        fontsize=12,
-        fontweight="bold",
     )
-    fig.tight_layout()
-    fig.savefig(ROOT / "docs" / "figures" / "benchmark.png", dpi=200)
     print((ROOT / "docs" / "benchmark.md").read_text())
 
 
