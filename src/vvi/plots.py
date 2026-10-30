@@ -428,7 +428,7 @@ def trend(fit: HybridImmunityFit, agg: pd.DataFrame, ax=None, *, title: str | No
     # peaks, marked in orange and hand-lettered
     from scipy.signal import find_peaks
 
-    peaks, _ = find_peaks(curve, prominence=curve.max() * 0.2)
+    peaks, _ = find_peaks(curve, prominence=float(np.max(curve)) * 0.2)
     for k, pk in enumerate(peaks[:2]):
         ax.plot(days[pk], curve[pk], "o", ms=5, color=ORANGE, zorder=5)
         hand(ax, days[pk] + 9, curve[pk] * 1.02, ["first wave", "second wave"][k], size=12.5)
@@ -500,7 +500,7 @@ def waning(
     ax.set_xticks(x, [_band(e.term) for e in eff])
     _tick_fonts(ax, 10.5)
     ax.set_xlim(-0.6, len(eff) - 0.4)
-    ax.set_ylim(0.9, max(hrs.max(), 1) * 1.12)
+    ax.set_ylim(0.9, max(float(np.max(hrs)), 1.0) * 1.12)
     axis_label(ax, "hazard ratio vs the first band", which="y")
     axis_label(ax, "days since the last dose or infection")
     return ax
@@ -605,7 +605,7 @@ def histories(
     caps(ax, -6, n - 0.15, "exposure history", ha="right", va="bottom")
     if curve is not None:  # epidemic ridge above the lanes
         t = np.arange(horizon)
-        y = n + 0.55 + 2.6 * curve / curve.max()
+        y = n + 0.55 + 2.6 * curve / float(np.max(curve))
         ridge(ax, t, y, offsets=(0.08, 0.16, 0.25), lw=1.2)
     for i, row in ppl.iterrows():
         yi = n - 1 - i
