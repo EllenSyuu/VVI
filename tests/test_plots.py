@@ -40,10 +40,12 @@ def test_every_figure_renders(fitted, theme):
     curves = {"HR 1.20": vvi.power(f.contrast("BBBI", "BBI"), 40_000, sizes, log_hr=np.log(1.2))}
     rows = __import__("pandas").DataFrame(
         {
-            "pipeline": ["person-day", "aggregated", "aggregated"],
-            "people": [1e3, 1e3, 1e6],
-            "seconds": [20.0, 1.0, 13.0],
-            "mib": [450.0, 60.0, 320.0],
+            "pipeline": ["person-day", "person-day", "aggregated", "aggregated", "aggregated"],
+            "people": [1e3, 5e3, 1e3, 5e3, 1e6],
+            "seconds": [20.0, 70.0, 1.0, 1.0, 13.0],
+            "mib": [450.0, 5000.0, 60.0, 60.0, 320.0],
+            "person_days": [3e5, 1.6e6, 3e5, 1.6e6, 3e8],
+            "glm_rows": [3e5, 1.6e6, 9000.0, 17445.0, 30000.0],
         }
     )
     small = vvi.simulate(500, seed=1)

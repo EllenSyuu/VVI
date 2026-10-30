@@ -13,7 +13,7 @@ waning and the cohort size each question needs.
 ![statsmodels](https://img.shields.io/badge/models-statsmodels-4051B5)
 ![mypy](https://img.shields.io/badge/types-mypy-2A6DB2)
 ![Ruff](https://img.shields.io/badge/lint-Ruff-D7FF64)
-![Coverage 97%](https://img.shields.io/badge/coverage-97%25-1BAF7A)
+![Coverage 97%](https://img.shields.io/badge/coverage-95%25-1BAF7A)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **[Live explorer](https://ellensyuu.github.io/VVI/)** · [Why](#why) · [Quick start](#quick-start) · [What it estimates](#what-it-estimates) · [Validation](#validated-against-a-planted-ground-truth) · [Engineering](#engineering) · [Docs](docs/)
@@ -22,7 +22,7 @@ waning and the cohort size each question needs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/hero-dark.gif">
-  <img alt="Animation: fitted daily infection rates over 2022 for four vaccination–infection histories, then their hazard ratios against two doses" src="docs/img/hero-light.gif" width="100%">
+  <img alt="Animation: a cursor sweeps through 2022 drawing the fitted daily infection rate for four vaccination–infection histories, then bars fill with how much lower each hazard is than two doses" src="docs/img/hero-light.gif" width="100%">
 </picture>
 
 <sub>All figures and animations in this repository are generated from **synthetic data** by `scripts/render_assets.py`. The repository contains no real data.</sub>
@@ -181,8 +181,8 @@ flowchart LR
 | **Automation** | CI on Python 3.10–3.13 (data guard, Ruff, mypy, 38 tests including figure smoke tests, CLI demo); on-demand Pages deployment of the explorer. |
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.png">
-  <img alt="Build and fit time and peak memory against cohort size for the person-day GLM and the aggregated fit" src="docs/img/benchmark-light.png" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.gif">
+  <img alt="Benchmark: 70 times faster and 90 times less memory at equal size; build and fit time and peak memory against cohort size, with the person-day cost extrapolated to a million people" src="docs/img/benchmark-light.gif" width="100%">
 </picture>
 
 ## Repository layout

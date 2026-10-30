@@ -75,7 +75,7 @@ def main() -> None:
         plots.benchmark(bench, IMG / f"benchmark-{theme}.png")
 
         plots.animate(
-            lambda buf, p: plots.hero(fit, buf, progress=p), IMG / f"hero-{theme}.gif", frames=48
+            lambda buf, p: plots.hero(fit, buf, progress=p), IMG / f"hero-{theme}.gif", frames=64
         )
         plots.animate(
             lambda buf, p: plots.recovery(fit, truth, buf, progress=p),
@@ -86,6 +86,11 @@ def main() -> None:
                 sizes, curves, buf, simulated=sim, markers=MARKERS, progress=p
             ),
             IMG / f"power-{theme}.gif",
+        )
+        plots.animate(
+            lambda buf, p: plots.benchmark(bench, buf, progress=p),
+            IMG / f"benchmark-{theme}.gif",
+            frames=48,
         )
         print(f"{theme}: done")
 

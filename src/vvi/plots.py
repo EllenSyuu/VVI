@@ -229,74 +229,251 @@ def _ring(ax: Axes, x: float, y: float, s: float = 120) -> None:
     ax.scatter([x], [y], s=s, facecolor="none", edgecolor=_theme.ink, linewidth=1.4, zorder=5)
 
 
+# --------------------------------------------------------------------------- flourishes
+
+
+def _gradient_fill(
+    ax: Axes, x: np.ndarray, y: np.ndarray, color: str, alpha: float = 0.22, zorder: float = 1
+) -> None:
+    """Fill under a curve with a vertical fade, transparent at the baseline."""
+    from matplotlib.colors import to_rgb
+    from matplotlib.patches import Polygon
+
+    if len(x) < 2:
+        return
+    r, g, b = to_rgb(color)
+    ramp = np.zeros((256, 1, 4))
+    ramp[:, :, 0], ramp[:, :, 1], ramp[:, :, 2] = r, g, b
+    ramp[:, :, 3] = np.linspace(0, alpha, 256)[:, None] ** 1.2 / alpha**0.2
+    top = float(np.max(y)) or 1.0
+    im = ax.imshow(
+        ramp,
+        aspect="auto",
+        origin="lower",
+        zorder=zorder,
+        extent=(float(x[0]), float(x[-1]), 0.0, top),
+        interpolation="bilinear",
+    )
+    clip = Polygon(
+        np.column_stack([np.r_[x, x[::-1]], np.r_[y, np.zeros_like(y)]]),
+        closed=True,
+        facecolor="none",
+        edgecolor="none",
+    )
+    ax.add_patch(clip)
+    im.set_clip_path(clip)
+
+
+def _pill(
+    ax: Axes,
+    x: float,
+    y: float,
+    text: str,
+    color: str,
+    *,
+    transform: Any = None,
+    ha: str = "center",
+    size: float = 10.5,
+) -> None:
+    """A small rounded label, filled with the colour and lettered in the surface colour."""
+    ax.text(
+        x,
+        y,
+        text,
+        ha=ha,
+        va="center",
+        fontsize=size,
+        fontweight="bold",
+        color=_theme.surface,
+        transform=transform or ax.transData,
+        zorder=8,
+        bbox={"boxstyle": "round,pad=0.35,rounding_size=0.8", "fc": color, "ec": "none"},
+    )
+
+
+def _partial(xs: np.ndarray, ys: np.ndarray, frac: float, log: bool = True) -> tuple:
+    """The part of a polyline left of a cut at ``frac`` of the (log) x-span."""
+    xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+    if frac >= 1:
+        return xs, ys
+    lx = np.log(xs) if log else xs
+    cut = lx[0] + frac * (lx[-1] - lx[0])
+    keep = lx <= cut
+    if keep.sum() == len(xs):
+        return xs, ys
+    i = int(keep.sum())
+    if i == 0:
+        return xs[:1], ys[:1]
+    t = (cut - lx[i - 1]) / (lx[i] - lx[i - 1])
+    ly = np.log(ys) if log else ys
+    yc = ly[i - 1] + t * (ly[i] - ly[i - 1])
+    xc = np.exp(cut) if log else cut
+    return np.r_[xs[:i], xc], np.r_[ys[:i], np.exp(yc) if log else yc]
+
+
 # --------------------------------------------------------------------------- hero
 
 
 HERO_PROFILES = ("BB", "BBB", "BBI", "BBBI")
+_MONTHS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
+_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 def hero(fit: HybridImmunityFit, out: Path | BinaryIO, progress: float = 1.0) -> Path:
-    """Fitted daily infection rate by exposure history, and the hazard ratios behind it."""
+    """Fitted daily infection rate by exposure history, and the protection behind it.
+
+    Animated, a cursor sweeps through the calendar year drawing the curves; then the
+    protection bars fill.
+    """
     t = _theme
-    colors = dict(zip(HERO_PROFILES, (t.ink_3, t.ramp[2], t.series[2], t.series[1]), strict=True))
-    labels = {"BB": "BB (reference)", "BBB": "BBB", "BBI": "BBI", "BBBI": "BBBI"}
+    colors = dict(zip(HERO_PROFILES, (t.ink_3, t.series[0], t.series[2], t.series[1]), strict=True))
+    names = {
+        "BB": "BB · two doses (reference)",
+        "BBB": "BBB · booster",
+        "BBI": "BBI · infected after 2 doses",
+        "BBBI": "BBBI · infected after booster",
+    }
     fig = _figure(
-        5.8,
+        6.4,
         "Reinfection risk in calendar time, by exposure history",
-        "600,000 synthetic people (B = Comirnaty dose, I = infection): the same epidemic "
-        "waves, different hazard ratios.",
+        "600,000 synthetic people. Every history rides the same epidemic waves; a hazard "
+        "ratio sets how high.",
         legend=True,
     )
-    _legend(fig, [Line2D([], [], color=colors[p], lw=3, label=labels[p]) for p in HERO_PROFILES], 4)
-    ax, bx = fig.subplots(1, 2, width_ratios=(2.1, 1))
+    _legend(
+        fig,
+        [
+            Line2D([], [], color=colors[p], lw=3, label=p if p != "BB" else "BB (reference)")
+            for p in HERO_PROFILES
+        ],
+        4,
+    )
+    ax, bx = fig.subplots(1, 2, width_ratios=(2.05, 1))
 
     days = np.arange(0, 365)
-    frac = _stage(progress, 0, 2) if progress < 1 else 1.0
-    n = max(2, int(frac * len(days)))
-    peak = 0.0
-    for p in HERO_PROFILES:
-        rate = fit.baseline_hazard(days, profile=p) * 1e4
-        peak = max(peak, float(np.max(rate)))
-        ax.plot(
-            days[:n],
-            rate[:n],
-            color=colors[p],
-            lw=3.0 if p == "BBBI" else 2.2,
-            zorder=3 if p == "BBBI" else 2,
+    rates = {p: fit.baseline_hazard(days, profile=p) * 1e4 for p in HERO_PROFILES}
+    peak = float(np.max(rates["BB"]))
+    sweep = min(1.0, progress / 0.6) if progress < 1 else 1.0  # steady calendar cursor
+    n = max(2, int(round(sweep * len(days))))
+    for p in HERO_PROFILES:  # BB first, BBBI last (on top)
+        x, y = days[:n].astype(float), rates[p][:n]
+        _gradient_fill(
+            ax, x, y, colors[p], alpha=0.30 if p == "BB" else 0.22, zorder=1.5 if p == "BB" else 1.6
         )
-    ax.set_xlim(-4, 368)
-    ax.set_ylim(0, peak * 1.12)
+        ax.plot(
+            x, y, color=colors[p], lw=3.2 if p == "BBBI" else 2.3, zorder=4 if p == "BBBI" else 3
+        )
+        if sweep < 1:
+            ax.scatter(
+                [x[-1]],
+                [y[-1]],
+                s=44,
+                color=colors[p],
+                edgecolor=t.surface,
+                linewidth=1.6,
+                zorder=6,
+            )
+    if sweep < 1:
+        cut = float(days[n - 1])
+        ax.axvline(cut, color=t.ink_3, lw=1.0, ls=(0, (2, 3)), zorder=2)
+        m = min(11, int(cut // 30.42))
+        _pill(ax, cut, peak * 1.13, f"{_MONTH_NAMES[m]} 2022", t.ink_2, size=10)
+    else:
+        bb = rates["BB"]
+        w1 = int(np.argmax(np.where(days < 180, bb, 0)))
+        w2 = int(np.argmax(np.where(days >= 180, bb, 0)))
+        for k, d in enumerate((w1, w2), start=1):
+            _pill(ax, d, bb[d] + peak * 0.085, f"wave {k}", t.ink_3, size=9.5)
+        # the gap between the reference and BBBI at the first peak
+        x0 = w1 + 16
+        top, bot = rates["BB"][x0], rates["BBBI"][x0]
+        ax.annotate(
+            "",
+            xy=(x0, bot * 1.06),
+            xytext=(x0, top * 0.98),
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": t.series[1],
+                "lw": 1.6,
+                "shrinkA": 0,
+                "shrinkB": 0,
+                "mutation_scale": 12,
+            },
+            zorder=7,
+        )
+        drop = 1 - fit.profile_effect("BBBI").hr
+        ax.plot(
+            [x0 + 4, w1 + 44], [(top + bot) / 2, peak * 0.58], color=t.series[1], lw=0.9, zorder=6
+        )
+        ax.text(
+            w1 + 47,
+            peak * 0.58,
+            f"BBBI: {drop:.0%} lower\nhazard than BB",
+            color=t.series[1],
+            fontsize=11.5,
+            fontweight="bold",
+            va="center",
+            zorder=7,
+        )
+    ax.set_xlim(-2, 366)
+    ax.set_ylim(0, peak * 1.22)
     month = np.arange(0, 365, 30.42)
-    ax.set_xticks(month + 15.2, ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"])
+    ax.set_xticks(month + 15.2, _MONTHS)
     ax.tick_params(axis="x", length=0)
     ax.set_title("Daily infections per 10,000 at risk")
-    ax.set_xlabel("Calendar year")
 
+    # Protection bars: 1 - HR on a track, filled after the sweep.
+    bx.set_title("Lower hazard than BB")
     bars = [p for p in HERO_PROFILES if p != fit.reference]
-    grow = _stage(progress, 1, 2) if progress < 1 else 1.0
-    for i, p in enumerate(bars):
+    grow = _ease((progress - 0.6) / 0.4) if progress < 1 else 1.0
+    for k, p in enumerate(bars):
+        y = len(bars) - 1 - k
         e = fit.profile_effect(p)
-        h = 1 - (1 - e.hr) * grow
-        bx.bar(i, h, color=colors[p], width=0.62)
-        if grow >= 1:
-            lo, hi = e.ci
-            bx.plot([i, i], [lo, hi], color=t.ink, lw=1.4, zorder=4)
-            bx.text(
-                i,
-                hi + 0.04,
-                f"{e.hr:.2f}",
-                ha="center",
-                va="bottom",
-                color=t.ink,
-                fontsize=12.5,
-                fontweight="bold",
+        pe = 1 - e.hr
+        lo_pe, hi_pe = 1 - e.ci[1], 1 - e.ci[0]
+        bx.plot([0, 1], [y, y], color=t.grid, lw=17, solid_capstyle="round", zorder=1)
+        if grow > 0:
+            bx.plot(
+                [0, max(pe * grow, 0.001)],
+                [y, y],
+                color=colors[p],
+                lw=17,
+                solid_capstyle="round",
+                zorder=2,
             )
-    bx.axhline(1, color=t.ink_3, lw=1.2, ls=(0, (3, 3)))
-    bx.text(len(bars) - 0.5, 1.02, "BB = 1", ha="right", va="bottom", color=t.ink_3, fontsize=10.5)
-    bx.set_xticks(range(len(bars)), bars)
-    bx.set_ylim(0, 1.18)
-    bx.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    bx.set_title("Hazard ratio vs BB")
+        bx.text(
+            -0.02,
+            y + 0.3,
+            names[p],
+            ha="left",
+            va="bottom",
+            color=t.ink,
+            fontsize=11.5,
+            fontweight="bold",
+        )
+        bx.text(
+            1.13,
+            y + 0.06,
+            f"{pe * grow:.0%}",
+            ha="left",
+            va="center",
+            color=t.ink,
+            fontsize=19,
+            fontweight="bold",
+        )
+        if grow >= 1:
+            bx.text(
+                1.13,
+                y - 0.34,
+                f"CI {lo_pe:.0%}–{hi_pe:.0%}",
+                ha="left",
+                va="center",
+                color=t.ink_3,
+                fontsize=9.5,
+            )
+    bx.set_xlim(-0.06, 1.5)
+    bx.set_ylim(-0.6, len(bars) - 0.2)
+    bx.axis("off")
     return _save(fig, out)
 
 
@@ -667,62 +844,266 @@ def histories(
     return _save(fig, out)
 
 
-def benchmark(rows: pd.DataFrame, out: Path | BinaryIO) -> Path:
-    """Build + fit time and peak memory against cohort size, naive vs aggregated."""
-    t = _theme
-    fig = _figure(
-        7.2,
-        "Same likelihood, a table that does not grow",
-        "Synthetic cohorts on 2 vCPU / 7 GB RAM: the person-day panel runs out of memory "
-        "past ~5,000 people.",
-        legend=True,
+def _card(
+    fig: Figure, rect: tuple[float, float, float, float], value: str, label: str, color: str
+) -> None:
+    from matplotlib.patches import FancyBboxPatch
+
+    ax = fig.add_axes(rect)
+    ax.set_axis_off()
+    ax.add_patch(
+        FancyBboxPatch(
+            (0.01, 0.04),
+            0.98,
+            0.92,
+            boxstyle="round,pad=0,rounding_size=0.09",
+            transform=ax.transAxes,
+            fc=_theme.surface,
+            ec=_theme.grid,
+            lw=1.2,
+            mutation_aspect=rect[3] / rect[2] * fig.get_figheight() / fig.get_figwidth(),
+        )
     )
-    _legend(
-        fig,
-        [
-            Line2D([], [], color=t.ink_3, lw=3, marker="o", ms=6, label="person-day GLM"),
+    ax.add_patch(
+        FancyBboxPatch(
+            (0.06, 0.18),
+            0.022,
+            0.64,
+            boxstyle="round,pad=0,rounding_size=0.01",
+            transform=ax.transAxes,
+            fc=color,
+            ec="none",
+        )
+    )
+    ax.text(
+        0.14,
+        0.62,
+        value,
+        transform=ax.transAxes,
+        fontsize=26,
+        fontweight="bold",
+        color=color,
+        va="center",
+    )
+    ax.text(
+        0.14, 0.27, label, transform=ax.transAxes, fontsize=10.5, color=_theme.ink_2, va="center"
+    )
+
+
+def benchmark(rows: pd.DataFrame, out: Path | BinaryIO, progress: float = 1.0) -> Path:
+    """Build + fit time and peak memory against cohort size, naive vs aggregated.
+
+    Person-day cost beyond the largest measured size is extrapolated linearly (it scales
+    with person-days) and drawn dashed; the zone where it no longer fits in memory is shaded.
+    """
+    t = _theme
+    fig = plt.figure(figsize=(WIDTH, 9.0))
+    H = 9.0
+    fig.text(
+        0.012,
+        1 - 0.2 / H,
+        "Same likelihood, a table that does not grow",
+        ha="left",
+        va="top",
+        fontsize=19,
+        fontweight="bold",
+        color=t.ink,
+    )
+    fig.text(
+        0.012,
+        1 - 0.62 / H,
+        "Build + fit cost on synthetic cohorts (2 vCPU, 7 GB RAM). "
+        "Dashed: person-day cost extrapolated linearly.",
+        ha="left",
+        va="top",
+        fontsize=12.5,
+        color=t.ink_2,
+    )
+
+    pd_ = rows[rows["pipeline"] == "person-day"].sort_values("people")
+    ag = rows[rows["pipeline"] == "aggregated"].sort_values("people")
+    common = int(pd_["people"].max())
+    a_c = ag[ag["people"] == common].iloc[0]
+    p_c = pd_[pd_["people"] == common].iloc[0]
+    big = ag.iloc[-1]
+    stage_cards = _stage(progress, 0, 3) if progress < 1 else 1.0
+    cards = [
+        (
+            f"{p_c['seconds'] / a_c['seconds']:.0f}×",
+            f"faster at {_people(common)} people",
+            t.series[0],
+        ),
+        (
+            f"{p_c['mib'] / a_c['mib']:.0f}×",
+            f"less memory at {_people(common)} people",
+            t.series[2],
+        ),
+        (
+            f"{p_c['person_days'] / a_c['glm_rows']:.0f}×",
+            f"fewer rows ({p_c['person_days'] / 1e6:.1f}M → {a_c['glm_rows']:,})",
+            t.ramp[3],
+        ),
+        (
+            f"{big['seconds']:.0f} s",
+            f"for {_people(big['people'])} people, {big['mib']:.0f} MiB",
+            t.series[1],
+        ),
+    ]
+    if stage_cards > 0:
+        w, gap, x0, y0, h = 0.232, 0.012, 0.012, 1 - 1.95 / H, 0.95 / H
+        for k, (v, lab, col) in enumerate(cards):
+            if _stage(stage_cards, k, len(cards)) > 0.05 or progress >= 1:
+                _card(fig, (x0 + k * (w + gap), y0, w, h), v, lab, col)
+
+    leg_y = 1 - 2.22 / H
+    fig.legend(
+        handles=[
+            Line2D([], [], color=t.ink_3, lw=3, marker="o", ms=6, label="person-day GLM, measured"),
+            Line2D(
+                [], [], color=t.ink_3, lw=2.2, ls=(0, (3, 2.5)), label="person-day, extrapolated"
+            ),
             Line2D([], [], color=t.series[0], lw=3, marker="o", ms=6, label="vvi, aggregated"),
         ],
-        2,
+        loc="upper left",
+        ncols=3,
+        bbox_to_anchor=(0.006, leg_y),
     )
-    axes = fig.subplots(2, 1, sharex=True)
-    for ax, col, title, unit in (
-        (axes[0], "seconds", "Build + fit time", "s"),
-        (axes[1], "mib", "Peak memory", "MiB"),
+
+    grid = fig.add_gridspec(
+        2, 1, left=0.085, right=0.83, top=1 - 3.1 / H, bottom=0.075, hspace=0.42
+    )
+    lines = _stage(progress, 1, 3) if progress < 1 else 1.0
+    notes = _stage(progress, 2, 3) if progress < 1 else 1.0
+    xmax = 1.6e6
+    for i, (col, title, unit, fmt) in enumerate(
+        (
+            (
+                "seconds",
+                "Build + fit time",
+                "s",
+                lambda v: f"{v:,.0f} s" if v < 3600 else f"{v / 3600:.0f} h",
+            ),
+            (
+                "mib",
+                "Peak memory",
+                "MiB",
+                lambda v: (
+                    f"{v:,.0f} MiB"
+                    if v < 10_000
+                    else f"{v / 1024**2:.1f} TiB"
+                    if v > 1024**2 * 0.9
+                    else f"{v / 1024:,.0f} GiB"
+                ),
+            ),
+        )
     ):
-        for name, color in (("person-day", t.ink_3), ("aggregated", t.series[0])):
-            r = rows[rows["pipeline"] == name].sort_values("people")
-            ax.plot(r["people"], r[col], color=color, lw=2.6, zorder=3)
-            ax.scatter(
-                r["people"], r[col], s=40, color=color, edgecolor=t.surface, linewidth=1.6, zorder=4
-            )
-            last = r.iloc[-1]
-            text = (
-                f"{last[col]:,.0f} {unit} for {_people(last['people'])}"
-                if name == "aggregated"
-                else f"{last[col]:,.0f} {unit} for 5k"
+        ax = fig.add_subplot(grid[i])
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        # extrapolation of the person-day fit: linear in person-days
+        scale = float(big["people"]) / common
+        ext_x = np.array([common, float(big["people"])])
+        ext_y = np.array([p_c[col], p_c[col] * scale])
+        lo_y = float(min(ag[col].min(), pd_[col].min())) / 1.8
+        hi_y = float(ext_y[-1]) * 3.5
+        ax.set_ylim(lo_y, hi_y)
+        ax.set_xlim(700, xmax)
+        ax.axvspan(
+            common * 1.6,
+            xmax,
+            color=t.soft[1],
+            alpha=0.4 if t.name == "light" else 0.75,
+            lw=0,
+            zorder=0,
+        )
+        ax.text(
+            common * 1.75,
+            hi_y / 1.6,
+            "person-day panel no longer fits in 7 GB",
+            color=t.ink_2,
+            fontsize=10.5,
+            va="top",
+            zorder=2,
+        )
+
+        xs, ys = _partial(ag["people"].to_numpy(float), ag[col].to_numpy(float), lines)
+        ax.fill_between(xs, lo_y, ys, color=t.series[0], alpha=0.07, lw=0, zorder=1)
+        ax.plot(xs, ys, color=t.series[0], lw=3, zorder=4)
+        px, py = _partial(
+            pd_["people"].to_numpy(float), pd_[col].to_numpy(float), min(1.0, lines * 3)
+        )
+        ax.plot(px, py, color=t.ink_3, lw=3, zorder=3)
+        shown_ag = ag[ag["people"] <= xs[-1] * 1.0001]
+        ax.scatter(
+            shown_ag["people"],
+            shown_ag[col],
+            s=40,
+            color=t.series[0],
+            edgecolor=t.surface,
+            linewidth=1.6,
+            zorder=5,
+        )
+        shown_pd = pd_[pd_["people"] <= px[-1] * 1.0001]
+        ax.scatter(
+            shown_pd["people"],
+            shown_pd[col],
+            s=40,
+            color=t.ink_3,
+            edgecolor=t.surface,
+            linewidth=1.6,
+            zorder=5,
+        )
+        if lines >= 1:
+            ex, ey = _partial(ext_x, ext_y, notes)
+            ax.plot(ex, ey, color=t.ink_3, lw=2.2, ls=(0, (3, 2.5)), zorder=3)
+        if notes >= 1:
+            ax.annotate(
+                f"{fmt(ext_y[-1])}\n(extrapolated)",
+                (ext_x[-1], ext_y[-1]),
+                xytext=(10, 0),
+                textcoords="offset points",
+                va="center",
+                color=t.ink_2,
+                fontsize=10.5,
             )
             ax.annotate(
-                text,
-                (last["people"], last[col]),
-                xytext=(8, 0),
+                f"{fmt(big[col])}\nfor {_people(big['people'])}",
+                (big["people"], big[col]),
+                xytext=(10, 0),
                 textcoords="offset points",
                 va="center",
                 color=t.ink,
                 fontsize=11,
                 fontweight="bold",
             )
-        ax.set_yscale("log")
+            ratio = ext_y[-1] / float(big[col])
+            gx = float(big["people"]) * 0.62
+            top = float(np.exp(np.interp(np.log(gx), np.log(ext_x), np.log(ext_y))))
+            bot = float(np.exp(np.interp(np.log(gx), np.log(ag["people"]), np.log(ag[col]))))
+            ax.annotate(
+                "",
+                xy=(gx, bot * 1.25),
+                xytext=(gx, top / 1.25),
+                arrowprops={
+                    "arrowstyle": "<|-|>",
+                    "color": t.series[0],
+                    "lw": 1.4,
+                    "mutation_scale": 10,
+                    "shrinkA": 0,
+                    "shrinkB": 0,
+                },
+                zorder=6,
+            )
+            _pill(ax, gx, float(np.sqrt(top * bot)), f"{ratio:,.0f}×", t.series[0], size=11)
+        ax.xaxis.set_major_locator(FixedLocator([1e3, 1e4, 1e5, 1e6]))
+        ax.xaxis.set_minor_locator(NullLocator())
+        ax.xaxis.set_major_formatter(FuncFormatter(_people))
         ax.yaxis.set_major_formatter(
             FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 1 else f"{v:g}")
         )
         ax.set_title(f"{title} ({unit})")
-    axes[1].set_xscale("log")
-    axes[1].xaxis.set_major_locator(FixedLocator([1e3, 1e4, 1e5, 1e6]))
-    axes[1].xaxis.set_minor_locator(NullLocator())
-    axes[1].xaxis.set_major_formatter(FuncFormatter(_people))
-    axes[1].set_xlim(700, 3.2e6)
-    axes[1].set_xlabel("People in the cohort")
+        if i == 1:
+            ax.set_xlabel("People in the cohort")
     return _save(fig, out)
 
 
