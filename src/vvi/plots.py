@@ -427,15 +427,15 @@ def hero(fit: HybridImmunityFit, out: Path | BinaryIO, progress: float = 1.0) ->
     bars = [p for p in HERO_PROFILES if p != fit.reference]
     grow = _ease((progress - 0.6) / 0.4) if progress < 1 else 1.0
     for k, p in enumerate(bars):
-        y = len(bars) - 1 - k
+        row = len(bars) - 1 - k
         e = fit.profile_effect(p)
         pe = 1 - e.hr
         lo_pe, hi_pe = 1 - e.ci[1], 1 - e.ci[0]
-        bx.plot([0, 1], [y, y], color=t.grid, lw=17, solid_capstyle="round", zorder=1)
+        bx.plot([0, 1], [row, row], color=t.grid, lw=17, solid_capstyle="round", zorder=1)
         if grow > 0:
             bx.plot(
                 [0, max(pe * grow, 0.001)],
-                [y, y],
+                [row, row],
                 color=colors[p],
                 lw=17,
                 solid_capstyle="round",
@@ -443,7 +443,7 @@ def hero(fit: HybridImmunityFit, out: Path | BinaryIO, progress: float = 1.0) ->
             )
         bx.text(
             -0.02,
-            y + 0.3,
+            row + 0.3,
             names[p],
             ha="left",
             va="bottom",
@@ -453,7 +453,7 @@ def hero(fit: HybridImmunityFit, out: Path | BinaryIO, progress: float = 1.0) ->
         )
         bx.text(
             1.13,
-            y + 0.06,
+            row + 0.06,
             f"{pe * grow:.0%}",
             ha="left",
             va="center",
@@ -464,7 +464,7 @@ def hero(fit: HybridImmunityFit, out: Path | BinaryIO, progress: float = 1.0) ->
         if grow >= 1:
             bx.text(
                 1.13,
-                y - 0.34,
+                row - 0.34,
                 f"CI {lo_pe:.0%}–{hi_pe:.0%}",
                 ha="left",
                 va="center",
