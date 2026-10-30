@@ -13,7 +13,7 @@ waning and the cohort size each question needs.
 ![statsmodels](https://img.shields.io/badge/models-statsmodels-4051B5)
 ![mypy](https://img.shields.io/badge/types-mypy-2A6DB2)
 ![Ruff](https://img.shields.io/badge/lint-Ruff-D7FF64)
-![Coverage 97%](https://img.shields.io/badge/coverage-95%25-1BAF7A)
+![Coverage 95%](https://img.shields.io/badge/coverage-95%25-1BAF7A)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **[Live explorer](https://ellensyuu.github.io/VVI/)** · [Why](#why) · [Quick start](#quick-start) · [What it estimates](#what-it-estimates) · [Validation](#validated-against-a-planted-ground-truth) · [Engineering](#engineering) · [Docs](docs/)
